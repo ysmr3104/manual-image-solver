@@ -1124,10 +1124,11 @@ function main() {
       return;
    }
 
-   console.show();
    console.writeln("<b>" + TITLE + " v" + VERSION + "</b>");
    console.writeln("---");
 
+   // モードレスダイアログとして表示
+   // ユーザーが画像ウィンドウの Readout バーで座標を確認できるようにする
    var dlg = new ManualSolverDialog();
    dlg.execute();
 }
