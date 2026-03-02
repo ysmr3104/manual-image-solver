@@ -514,9 +514,9 @@ function StarEditDialog(parent, starIndex, starData) {
    pxLabel.setFixedWidth(30);
 
    this.pxEdit = new Edit(pixelGroup);
-   this.pxEdit.text = this.starData.px !== undefined ? this.starData.px.toFixed(2) : "0.00";
+   this.pxEdit.text = (this.starData.px !== undefined && this.starData.px !== null) ? this.starData.px.toFixed(2) : "";
    this.pxEdit.setFixedWidth(100);
-   this.pxEdit.readOnly = true;
+   this.pxEdit.toolTip = "画像上の X 座標（Readout バーで確認）";
 
    var pyLabel = new Label(pixelGroup);
    pyLabel.text = "Y:";
@@ -524,9 +524,9 @@ function StarEditDialog(parent, starIndex, starData) {
    pyLabel.setFixedWidth(30);
 
    this.pyEdit = new Edit(pixelGroup);
-   this.pyEdit.text = this.starData.py !== undefined ? this.starData.py.toFixed(2) : "0.00";
+   this.pyEdit.text = (this.starData.py !== undefined && this.starData.py !== null) ? this.starData.py.toFixed(2) : "";
    this.pyEdit.setFixedWidth(100);
-   this.pyEdit.readOnly = true;
+   this.pyEdit.toolTip = "画像上の Y 座標（Readout バーで確認）";
 
    var pixelSizer = new HorizontalSizer;
    pixelSizer.spacing = 4;
@@ -640,6 +640,18 @@ function StarEditDialog(parent, starIndex, starData) {
    this.okButton.text = "OK";
    this.okButton.icon = this.scaledResource(":/icons/ok.png");
    this.okButton.onClick = function () {
+      // ピクセル座標の検証
+      var px = parseFloat(dialog.pxEdit.text);
+      var py = parseFloat(dialog.pyEdit.text);
+      if (isNaN(px) || isNaN(py)) {
+         var mb = new MessageBox("ピクセル座標 X, Y を入力してください。\n\n" +
+            "画像ウィンドウ上で星にマウスを合わせると、\n" +
+            "Readout バーに座標が表示されます。",
+            TITLE, StdIcon_Error, StdButton_Ok);
+         mb.execute();
+         return;
+      }
+
       var ra = parseRAInput(dialog.raEdit.text);
       var dec = parseDECInput(dialog.decEdit.text);
       if (ra === undefined || dec === undefined) {
@@ -660,6 +672,8 @@ function StarEditDialog(parent, starIndex, starData) {
          mb.execute();
          return;
       }
+      dialog.starData.px = px;
+      dialog.starData.py = py;
       dialog.starData.ra = ra;
       dialog.starData.dec = dec;
       dialog.starData.name = dialog.nameEdit.text.trim();
@@ -704,24 +718,13 @@ function ManualSolverDialog() {
 
    var dialog = this;
    this.windowTitle = TITLE + " v" + VERSION;
-   this.minWidth = 700;
-   this.minHeight = 600;
+   this.minWidth = 600;
 
    // 星ペアリスト
    this.starPairs = [];  // [{px, py, ra, dec, name}]
    this.wcsResult = null;
    this.settings = new ManualSolverSettings();
    this.settings.load();
-
-   // 画像プレビュー用の状態
-   this.previewBitmap = null;
-   this.previewScale = 0.25;      // 初期ズーム（1/4スケール）
-   this.previewOffsetX = 0;       // パン用オフセット
-   this.previewOffsetY = 0;
-   this.isDragging = false;
-   this.dragStartX = 0;
-   this.dragStartY = 0;
-   this.selectMode = true;        // true=星選択モード, false=パンモード
 
    // --- 画像選択 ---
    var imageLabel = new Label(this);
@@ -754,188 +757,21 @@ function ManualSolverDialog() {
    imageSizer.add(this.imageCombo, 100);
    imageSizer.add(this.imageSizeLabel);
 
-   // --- 画像プレビュー ---
-   var previewGroup = new GroupBox(this);
-   previewGroup.title = "画像プレビュー（クリックで星を選択）";
+   // --- 操作説明 ---
+   var helpGroup = new GroupBox(this);
+   helpGroup.title = "操作手順";
 
-   this.previewScroll = new ScrollBox(previewGroup);
-   this.previewScroll.setMinSize(640, 400);
+   var helpLabel = new Label(helpGroup);
+   helpLabel.text =
+      "1. 画像ウィンドウ上で Readout カーソルを有効にする\n" +
+      "2. 星にマウスを合わせて Readout バーの X, Y 座標を読み取る\n" +
+      "3. [Add Star] をクリックし、X/Y と天体名（または RA/DEC）を入力\n" +
+      "4. 4 星以上登録したら [Solve] → [Apply] で WCS を適用";
+   helpLabel.textAlignment = TextAlign_Left;
 
-   this.previewControl = new Control(this.previewScroll);
-
-   this.previewControl.onPaint = function (x0, y0, x1, y1) {
-      var g = new Graphics(this);
-      g.fillRect(x0, y0, x1, y1, new Brush(0xFF202020));
-
-      if (dialog.previewBitmap) {
-         var bw = Math.round(dialog.previewBitmap.width * dialog.previewScale);
-         var bh = Math.round(dialog.previewBitmap.height * dialog.previewScale);
-         g.drawScaledBitmap(
-            dialog.previewOffsetX, dialog.previewOffsetY,
-            dialog.previewOffsetX + bw, dialog.previewOffsetY + bh,
-            dialog.previewBitmap
-         );
-
-         // 選択済み星のマーカーを描画
-         for (var i = 0; i < dialog.starPairs.length; i++) {
-            var star = dialog.starPairs[i];
-            var sx = dialog.previewOffsetX + star.px * dialog.previewScale;
-            var sy = dialog.previewOffsetY + star.py * dialog.previewScale;
-            var r = 12;
-
-            // 十字（赤）
-            g.pen = new Pen(0xFFFF0000, 2);
-            g.drawLine(sx - r, sy, sx + r, sy);
-            g.drawLine(sx, sy - r, sx, sy + r);
-            // 円（緑）
-            g.pen = new Pen(0xFF00FF00, 1.5);
-            g.drawCircle(sx, sy, r);
-            // 番号ラベル
-            g.pen = new Pen(0xFFFFFF00);
-            g.drawText(sx + r + 2, sy - r, "" + (i + 1));
-         }
-      }
-
-      g.end();
-   };
-
-   this.previewControl.onMousePress = function (x, y, button, buttonState, modifiers) {
-      if (button === MouseButton_Left) {
-         if (dialog.selectMode) {
-            // 星選択モード: 左クリックで星を選択
-            dialog.handleStarClick(x, y);
-         } else {
-            // パンモード: ドラッグ開始
-            dialog.isDragging = true;
-            dialog.dragStartX = x;
-            dialog.dragStartY = y;
-         }
-      } else if (button === MouseButton_Middle) {
-         // 中クリックは常にパン開始
-         dialog.isDragging = true;
-         dialog.dragStartX = x;
-         dialog.dragStartY = y;
-      }
-   };
-
-   this.previewControl.onMouseRelease = function (x, y, button, buttonState, modifiers) {
-      if (button === MouseButton_Left || button === MouseButton_Middle) {
-         dialog.isDragging = false;
-      }
-   };
-
-   this.previewControl.onMouseMove = function (x, y, buttonState, modifiers) {
-      if (dialog.isDragging) {
-         var dx = x - dialog.dragStartX;
-         var dy = y - dialog.dragStartY;
-         dialog.previewOffsetX += dx;
-         dialog.previewOffsetY += dy;
-         dialog.dragStartX = x;
-         dialog.dragStartY = y;
-         dialog.previewControl.repaint();
-      }
-   };
-
-   this.previewControl.onMouseWheel = function (x, y, delta, buttonState, modifiers) {
-      var oldScale = dialog.previewScale;
-      if (delta > 0) {
-         dialog.previewScale = Math.min(4.0, dialog.previewScale * 1.2);
-      } else {
-         dialog.previewScale = Math.max(0.05, dialog.previewScale / 1.2);
-      }
-
-      // マウス位置を中心にズーム
-      var factor = dialog.previewScale / oldScale;
-      dialog.previewOffsetX = x - factor * (x - dialog.previewOffsetX);
-      dialog.previewOffsetY = y - factor * (y - dialog.previewOffsetY);
-
-      dialog.updatePreviewControlSize();
-      dialog.previewControl.repaint();
-   };
-
-   // --- モード切替ボタン ---
-   this.selectModeButton = new ToolButton(previewGroup);
-   this.selectModeButton.icon = this.scaledResource(":/icons/select.png");
-   this.selectModeButton.setScaledFixedSize(24, 24);
-   this.selectModeButton.toolTip = "星選択モード: クリックで星を追加";
-   this.selectModeButton.checkable = true;
-   this.selectModeButton.checked = true;
-   this.selectModeButton.onClick = function () {
-      dialog.selectMode = true;
-      dialog.selectModeButton.checked = true;
-      dialog.panModeButton.checked = false;
-      dialog.modeLabel.text = "星選択モード — クリックで星を追加";
-   };
-
-   this.panModeButton = new ToolButton(previewGroup);
-   this.panModeButton.icon = this.scaledResource(":/icons/move.png");
-   this.panModeButton.setScaledFixedSize(24, 24);
-   this.panModeButton.toolTip = "パンモード: ドラッグで画像を移動";
-   this.panModeButton.checkable = true;
-   this.panModeButton.checked = false;
-   this.panModeButton.onClick = function () {
-      dialog.selectMode = false;
-      dialog.selectModeButton.checked = false;
-      dialog.panModeButton.checked = true;
-      dialog.modeLabel.text = "パンモード — ドラッグで画像を移動";
-   };
-
-   // ズームボタン
-   this.zoomInButton = new ToolButton(previewGroup);
-   this.zoomInButton.icon = this.scaledResource(":/icons/zoom-in.png");
-   this.zoomInButton.setScaledFixedSize(24, 24);
-   this.zoomInButton.toolTip = "ズームイン";
-   this.zoomInButton.onClick = function () {
-      dialog.previewScale = Math.min(4.0, dialog.previewScale * 1.5);
-      dialog.updatePreviewControlSize();
-      dialog.previewControl.repaint();
-   };
-
-   this.zoomOutButton = new ToolButton(previewGroup);
-   this.zoomOutButton.icon = this.scaledResource(":/icons/zoom-out.png");
-   this.zoomOutButton.setScaledFixedSize(24, 24);
-   this.zoomOutButton.toolTip = "ズームアウト";
-   this.zoomOutButton.onClick = function () {
-      dialog.previewScale = Math.max(0.05, dialog.previewScale / 1.5);
-      dialog.updatePreviewControlSize();
-      dialog.previewControl.repaint();
-   };
-
-   this.zoomFitButton = new ToolButton(previewGroup);
-   this.zoomFitButton.icon = this.scaledResource(":/icons/zoom-optimal-fit.png");
-   this.zoomFitButton.setScaledFixedSize(24, 24);
-   this.zoomFitButton.toolTip = "全体表示";
-   this.zoomFitButton.onClick = function () {
-      dialog.zoomToFit();
-      dialog.previewControl.repaint();
-   };
-
-   this.zoomLabel = new Label(previewGroup);
-   this.zoomLabel.text = "";
-
-   this.modeLabel = new Label(previewGroup);
-   this.modeLabel.text = "星選択モード — クリックで星を追加";
-   this.modeLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
-
-   var zoomSizer = new HorizontalSizer;
-   zoomSizer.spacing = 4;
-   zoomSizer.add(this.selectModeButton);
-   zoomSizer.add(this.panModeButton);
-   zoomSizer.addSpacing(8);
-   zoomSizer.add(this.zoomInButton);
-   zoomSizer.add(this.zoomOutButton);
-   zoomSizer.add(this.zoomFitButton);
-   zoomSizer.addSpacing(8);
-   zoomSizer.add(this.zoomLabel);
-   zoomSizer.addSpacing(12);
-   zoomSizer.add(this.modeLabel);
-   zoomSizer.addStretch();
-
-   previewGroup.sizer = new VerticalSizer;
-   previewGroup.sizer.margin = 6;
-   previewGroup.sizer.spacing = 4;
-   previewGroup.sizer.add(zoomSizer);
-   previewGroup.sizer.add(this.previewScroll, 100);
+   helpGroup.sizer = new VerticalSizer;
+   helpGroup.sizer.margin = 6;
+   helpGroup.sizer.add(helpLabel);
 
    // --- 星テーブル ---
    var tableGroup = new GroupBox(this);
@@ -957,9 +793,17 @@ function ManualSolverDialog() {
    this.starTreeBox.setColumnWidth(3, 100);
    this.starTreeBox.setColumnWidth(4, 200);
    this.starTreeBox.setColumnWidth(5, 100);
-   this.starTreeBox.setMinHeight(120);
+   this.starTreeBox.setMinHeight(180);
 
    // テーブル操作ボタン
+   this.addButton = new PushButton(this);
+   this.addButton.text = "Add Star...";
+   this.addButton.icon = this.scaledResource(":/icons/add.png");
+   this.addButton.toolTip = "新しい星を追加（ピクセル座標 + 天球座標を入力）";
+   this.addButton.onClick = function () {
+      dialog.doAddStar();
+   };
+
    this.editButton = new PushButton(this);
    this.editButton.text = "Edit...";
    this.editButton.toolTip = "選択した星の座標を編集";
@@ -980,8 +824,8 @@ function ManualSolverDialog() {
       if (editDlg.execute()) {
          if (editDlg.accepted) {
             dialog.starPairs[idx] = editDlg.starData;
+            dialog.wcsResult = null;
             dialog.refreshStarTable();
-            dialog.previewControl.repaint();
          }
       }
    };
@@ -998,7 +842,6 @@ function ManualSolverDialog() {
          dialog.wcsResult = null;
          dialog.refreshStarTable();
          dialog.updateButtons();
-         dialog.previewControl.repaint();
       }
    };
 
@@ -1014,12 +857,13 @@ function ManualSolverDialog() {
          dialog.wcsResult = null;
          dialog.refreshStarTable();
          dialog.updateButtons();
-         dialog.previewControl.repaint();
       }
    };
 
    var tableButtonSizer = new HorizontalSizer;
    tableButtonSizer.spacing = 4;
+   tableButtonSizer.add(this.addButton);
+   tableButtonSizer.addSpacing(8);
    tableButtonSizer.add(this.editButton);
    tableButtonSizer.add(this.removeButton);
    tableButtonSizer.add(this.clearButton);
@@ -1074,22 +918,22 @@ function ManualSolverDialog() {
    this.sizer.margin = 8;
    this.sizer.spacing = 6;
    this.sizer.add(imageSizer);
-   this.sizer.add(previewGroup, 100);
-   this.sizer.add(tableGroup);
+   this.sizer.add(helpGroup);
+   this.sizer.add(tableGroup, 100);
    this.sizer.add(this.resultLabel);
    this.sizer.add(mainButtonSizer);
 
    // --- 画像変更時のコールバック ---
    this.imageCombo.onItemSelected = function (index) {
-      dialog.loadPreview();
+      dialog.updateImageInfo();
       dialog.starPairs = [];
       dialog.wcsResult = null;
       dialog.refreshStarTable();
       dialog.updateButtons();
    };
 
-   // 初期プレビュー読み込み
-   this.loadPreview();
+   // 初期画像情報表示
+   this.updateImageInfo();
 }
 
 ManualSolverDialog.prototype = new Dialog;
@@ -1107,98 +951,49 @@ ManualSolverDialog.prototype.getSelectedWindow = function () {
 };
 
 //----------------------------------------------------------------------------
-// プレビュー画像の読み込み（auto-stretch 付き）
+// 画像情報の更新
 //----------------------------------------------------------------------------
-ManualSolverDialog.prototype.loadPreview = function () {
+ManualSolverDialog.prototype.updateImageInfo = function () {
    var window = this.getSelectedWindow();
    if (!window || window.isNull) {
-      this.previewBitmap = null;
       this.imageSizeLabel.text = "";
-      this.previewControl.repaint();
+      return;
+   }
+   var image = window.mainView.image;
+   this.imageSizeLabel.text = "(" + image.width + " x " + image.height + " px)";
+};
+
+//----------------------------------------------------------------------------
+// 星追加処理
+//----------------------------------------------------------------------------
+ManualSolverDialog.prototype.doAddStar = function () {
+   var window = this.getSelectedWindow();
+   if (!window || window.isNull) {
+      var mb = new MessageBox("画像が選択されていません。", TITLE, StdIcon_Error, StdButton_Ok);
+      mb.execute();
       return;
    }
 
-   var image = window.mainView.image;
-   var w = image.width;
-   var h = image.height;
-   this.imageSizeLabel.text = "(" + w + " x " + h + " px)";
-
-   // Bitmap を作成（画像全体をレンダリング）
-   // PixInsight のレンダリング機能を使用
-   this.previewBitmap = window.mainView.image.render();
-
-   this.zoomToFit();
-   this.previewControl.repaint();
-};
-
-//----------------------------------------------------------------------------
-// ズームを全体表示に合わせる
-//----------------------------------------------------------------------------
-ManualSolverDialog.prototype.zoomToFit = function () {
-   if (!this.previewBitmap) return;
-
-   var cw = this.previewScroll.viewport.width;
-   var ch = this.previewScroll.viewport.height;
-   if (cw <= 0) cw = 640;
-   if (ch <= 0) ch = 400;
-
-   var scaleX = cw / this.previewBitmap.width;
-   var scaleY = ch / this.previewBitmap.height;
-   this.previewScale = Math.min(scaleX, scaleY);
-   this.previewOffsetX = 0;
-   this.previewOffsetY = 0;
-   this.updatePreviewControlSize();
-};
-
-//----------------------------------------------------------------------------
-// プレビューコントロールのサイズを更新
-//----------------------------------------------------------------------------
-ManualSolverDialog.prototype.updatePreviewControlSize = function () {
-   if (!this.previewBitmap) return;
-   var bw = Math.max(1, Math.round(this.previewBitmap.width * this.previewScale));
-   var bh = Math.max(1, Math.round(this.previewBitmap.height * this.previewScale));
-   this.previewControl.setMinSize(bw, bh);
-   this.zoomLabel.text = format("%.0f%%", this.previewScale * 100);
-};
-
-//----------------------------------------------------------------------------
-// 星クリック処理
-//----------------------------------------------------------------------------
-ManualSolverDialog.prototype.handleStarClick = function (ctrlX, ctrlY) {
-   if (!this.previewBitmap) return;
-   var window = this.getSelectedWindow();
-   if (!window || window.isNull) return;
-
-   // コントロール座標 → 画像座標
-   var imgX = (ctrlX - this.previewOffsetX) / this.previewScale;
-   var imgY = (ctrlY - this.previewOffsetY) / this.previewScale;
-
-   var image = window.mainView.image;
-   if (imgX < 0 || imgX >= image.width || imgY < 0 || imgY >= image.height) return;
-
-   // セントロイド計算
-   var centroid = computeCentroid(image, imgX, imgY, this.settings.centroidRadius);
-   var finalX, finalY;
-   if (centroid) {
-      finalX = centroid.x;
-      finalY = centroid.y;
-      console.writeln(format("Centroid: (%.2f, %.2f) → (%.2f, %.2f)", imgX, imgY, finalX, finalY));
-   } else {
-      finalX = imgX;
-      finalY = imgY;
-      console.writeln(format("Centroid failed, using click position: (%.2f, %.2f)", finalX, finalY));
-   }
-
-   // StarEditDialog を開く
-   var starData = { px: finalX, py: finalY, ra: undefined, dec: undefined, name: "" };
+   var starData = { px: undefined, py: undefined, ra: undefined, dec: undefined, name: "" };
    var editDlg = new StarEditDialog(this, this.starPairs.length + 1, starData);
    if (editDlg.execute()) {
       if (editDlg.accepted) {
+         // セントロイドスナップ
+         var image = window.mainView.image;
+         var px = editDlg.starData.px;
+         var py = editDlg.starData.py;
+         if (px >= 0 && px < image.width && py >= 0 && py < image.height) {
+            var centroid = computeCentroid(image, px, py, this.settings.centroidRadius);
+            if (centroid) {
+               console.writeln(format("Centroid snap: (%.2f, %.2f) -> (%.2f, %.2f)", px, py, centroid.x, centroid.y));
+               editDlg.starData.px = centroid.x;
+               editDlg.starData.py = centroid.y;
+            }
+         }
          this.starPairs.push(editDlg.starData);
          this.wcsResult = null;
          this.refreshStarTable();
          this.updateButtons();
-         this.previewControl.repaint();
       }
    }
 };
