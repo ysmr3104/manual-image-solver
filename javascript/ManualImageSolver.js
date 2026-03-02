@@ -721,6 +721,7 @@ function ManualSolverDialog() {
    this.isDragging = false;
    this.dragStartX = 0;
    this.dragStartY = 0;
+   this.selectMode = true;        // true=星選択モード, false=パンモード
 
    // --- 画像選択 ---
    var imageLabel = new Label(this);
@@ -799,31 +800,27 @@ function ManualSolverDialog() {
    };
 
    this.previewControl.onMousePress = function (x, y, button, buttonState, modifiers) {
-      if (button === MouseButton_Left && modifiers === KeyModifier_None) {
-         // パン開始
+      if (button === MouseButton_Left) {
+         if (dialog.selectMode) {
+            // 星選択モード: 左クリックで星を選択
+            dialog.handleStarClick(x, y);
+         } else {
+            // パンモード: ドラッグ開始
+            dialog.isDragging = true;
+            dialog.dragStartX = x;
+            dialog.dragStartY = y;
+         }
+      } else if (button === MouseButton_Middle) {
+         // 中クリックは常にパン開始
          dialog.isDragging = true;
          dialog.dragStartX = x;
          dialog.dragStartY = y;
-      } else if (button === MouseButton_Left && (modifiers & KeyModifier_Control)) {
-         // Ctrl+クリックで星選択
-         dialog.handleStarClick(x, y);
-      } else if (button === MouseButton_Right) {
-         // 右クリックで星選択
-         dialog.handleStarClick(x, y);
       }
    };
 
    this.previewControl.onMouseRelease = function (x, y, button, buttonState, modifiers) {
-      if (button === MouseButton_Left) {
-         if (dialog.isDragging) {
-            var dx = x - dialog.dragStartX;
-            var dy = y - dialog.dragStartY;
-            // 小さな移動量なら星選択と判定
-            if (Math.abs(dx) < 3 && Math.abs(dy) < 3) {
-               dialog.handleStarClick(x, y);
-            }
-            dialog.isDragging = false;
-         }
+      if (button === MouseButton_Left || button === MouseButton_Middle) {
+         dialog.isDragging = false;
       }
    };
 
@@ -854,6 +851,33 @@ function ManualSolverDialog() {
 
       dialog.updatePreviewControlSize();
       dialog.previewControl.repaint();
+   };
+
+   // --- モード切替ボタン ---
+   this.selectModeButton = new ToolButton(previewGroup);
+   this.selectModeButton.icon = this.scaledResource(":/icons/select.png");
+   this.selectModeButton.setScaledFixedSize(24, 24);
+   this.selectModeButton.toolTip = "星選択モード: クリックで星を追加";
+   this.selectModeButton.checkable = true;
+   this.selectModeButton.checked = true;
+   this.selectModeButton.onClick = function () {
+      dialog.selectMode = true;
+      dialog.selectModeButton.checked = true;
+      dialog.panModeButton.checked = false;
+      dialog.modeLabel.text = "星選択モード — クリックで星を追加";
+   };
+
+   this.panModeButton = new ToolButton(previewGroup);
+   this.panModeButton.icon = this.scaledResource(":/icons/move.png");
+   this.panModeButton.setScaledFixedSize(24, 24);
+   this.panModeButton.toolTip = "パンモード: ドラッグで画像を移動";
+   this.panModeButton.checkable = true;
+   this.panModeButton.checked = false;
+   this.panModeButton.onClick = function () {
+      dialog.selectMode = false;
+      dialog.selectModeButton.checked = false;
+      dialog.panModeButton.checked = true;
+      dialog.modeLabel.text = "パンモード — ドラッグで画像を移動";
    };
 
    // ズームボタン
@@ -889,13 +913,22 @@ function ManualSolverDialog() {
    this.zoomLabel = new Label(previewGroup);
    this.zoomLabel.text = "";
 
+   this.modeLabel = new Label(previewGroup);
+   this.modeLabel.text = "星選択モード — クリックで星を追加";
+   this.modeLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+
    var zoomSizer = new HorizontalSizer;
    zoomSizer.spacing = 4;
+   zoomSizer.add(this.selectModeButton);
+   zoomSizer.add(this.panModeButton);
+   zoomSizer.addSpacing(8);
    zoomSizer.add(this.zoomInButton);
    zoomSizer.add(this.zoomOutButton);
    zoomSizer.add(this.zoomFitButton);
    zoomSizer.addSpacing(8);
    zoomSizer.add(this.zoomLabel);
+   zoomSizer.addSpacing(12);
+   zoomSizer.add(this.modeLabel);
    zoomSizer.addStretch();
 
    previewGroup.sizer = new VerticalSizer;
