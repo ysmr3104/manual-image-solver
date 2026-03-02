@@ -11,7 +11,7 @@
 // Copyright (c) 2024-2025 Split Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.0.0"
+#define VERSION "0.0.1"
 
 #include <pjsr/DataType.jsh>
 #include <pjsr/StdIcon.jsh>
@@ -490,6 +490,18 @@ function ManualSolverSettings() {
 }
 
 //============================================================================
+// ヘルパー関数
+//============================================================================
+
+function getWindowById(id) {
+   var windows = ImageWindow.windows;
+   for (var i = 0; i < windows.length; i++) {
+      if (windows[i].mainView.id === id) return windows[i];
+   }
+   return null;
+}
+
+//============================================================================
 // StarEditDialog: 星座標入力ダイアログ
 //============================================================================
 
@@ -712,7 +724,7 @@ StarEditDialog.prototype = new Dialog;
 // ManualSolverDialog: メインダイアログ
 //============================================================================
 
-function ManualSolverDialog() {
+function ManualSolverDialog(starPairs, wcsResult, selectedImageId) {
    this.__base__ = Dialog;
    this.__base__();
 
@@ -720,11 +732,12 @@ function ManualSolverDialog() {
    this.windowTitle = TITLE + " v" + VERSION;
    this.minWidth = 600;
 
-   // 星ペアリスト
-   this.starPairs = [];  // [{px, py, ra, dec, name}]
-   this.wcsResult = null;
-   this.settings = new ManualSolverSettings();
-   this.settings.load();
+   // 外部から受け取った状態
+   this.starPairs = starPairs;   // [{px, py, ra, dec, name}]
+   this.wcsResult = wcsResult;
+   this.selectedImageId = selectedImageId;
+   this.action = "close";       // デフォルトアクション
+   this.selectedIndex = -1;
 
    // --- 画像選択 ---
    var imageLabel = new Label(this);
@@ -735,18 +748,14 @@ function ManualSolverDialog() {
    this.imageCombo = new ComboBox(this);
    this.imageCombo.toolTip = "プレートソルブする画像を選択";
    var windows = ImageWindow.windows;
+   var selectedIdx = 0;
    for (var i = 0; i < windows.length; i++) {
       this.imageCombo.addItem(windows[i].mainView.id);
-   }
-   if (ImageWindow.activeWindow && !ImageWindow.activeWindow.isNull) {
-      var activeId = ImageWindow.activeWindow.mainView.id;
-      for (var i = 0; i < windows.length; i++) {
-         if (windows[i].mainView.id === activeId) {
-            this.imageCombo.currentItem = i;
-            break;
-         }
+      if (windows[i].mainView.id === selectedImageId) {
+         selectedIdx = i;
       }
    }
+   this.imageCombo.currentItem = selectedIdx;
 
    this.imageSizeLabel = new Label(this);
    this.imageSizeLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
@@ -763,9 +772,9 @@ function ManualSolverDialog() {
 
    var helpLabel = new Label(helpGroup);
    helpLabel.text =
-      "1. 画像ウィンドウ上で Readout カーソルを有効にする\n" +
-      "2. 星にマウスを合わせて Readout バーの X, Y 座標を読み取る\n" +
-      "3. [Add Star] をクリックし、X/Y と天体名（または RA/DEC）を入力\n" +
+      "1. [Add Star] をクリック → 3秒間画像を操作できます\n" +
+      "2. 画像ウィンドウで星にマウスを合わせ、Readout バーの X/Y を確認\n" +
+      "3. 入力ダイアログが自動で開くので X/Y と天体名（または RA/DEC）を入力\n" +
       "4. 4 星以上登録したら [Solve] → [Apply] で WCS を適用";
    helpLabel.textAlignment = TextAlign_Left;
 
@@ -799,9 +808,11 @@ function ManualSolverDialog() {
    this.addButton = new PushButton(this);
    this.addButton.text = "Add Star...";
    this.addButton.icon = this.scaledResource(":/icons/add.png");
-   this.addButton.toolTip = "新しい星を追加（ピクセル座標 + 天球座標を入力）";
+   this.addButton.toolTip = "ダイアログを閉じて星を追加（3秒間画像を操作可能）";
    this.addButton.onClick = function () {
-      dialog.doAddStar();
+      dialog.selectedImageId = dialog.getSelectedImageId();
+      dialog.action = "add_star";
+      dialog.ok();
    };
 
    this.editButton = new PushButton(this);
@@ -812,22 +823,10 @@ function ManualSolverDialog() {
       if (!node) return;
       var idx = dialog.starTreeBox.childIndex(node);
       if (idx < 0 || idx >= dialog.starPairs.length) return;
-
-      var starData = {
-         px: dialog.starPairs[idx].px,
-         py: dialog.starPairs[idx].py,
-         ra: dialog.starPairs[idx].ra,
-         dec: dialog.starPairs[idx].dec,
-         name: dialog.starPairs[idx].name
-      };
-      var editDlg = new StarEditDialog(dialog, idx + 1, starData);
-      if (editDlg.execute()) {
-         if (editDlg.accepted) {
-            dialog.starPairs[idx] = editDlg.starData;
-            dialog.wcsResult = null;
-            dialog.refreshStarTable();
-         }
-      }
+      dialog.selectedImageId = dialog.getSelectedImageId();
+      dialog.selectedIndex = idx;
+      dialog.action = "edit_star";
+      dialog.ok();
    };
 
    this.removeButton = new PushButton(this);
@@ -853,7 +852,7 @@ function ManualSolverDialog() {
       var mb = new MessageBox("全ての星を削除しますか？", TITLE,
          StdIcon_Question, StdButton_Yes, StdButton_No);
       if (mb.execute() === StdButton_Yes) {
-         dialog.starPairs = [];
+         dialog.starPairs.length = 0;
          dialog.wcsResult = null;
          dialog.refreshStarTable();
          dialog.updateButtons();
@@ -877,7 +876,7 @@ function ManualSolverDialog() {
 
    // --- 結果表示 ---
    this.resultLabel = new Label(this);
-   this.resultLabel.text = "";
+   this.resultLabel.text = (this.wcsResult && this.wcsResult.message) ? this.wcsResult.message : "";
    this.resultLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
 
    // --- メインボタン ---
@@ -885,7 +884,7 @@ function ManualSolverDialog() {
    this.solveButton.text = "Solve";
    this.solveButton.icon = this.scaledResource(":/icons/execute.png");
    this.solveButton.toolTip = "WCS をフィッティング";
-   this.solveButton.enabled = false;
+   this.solveButton.enabled = this.starPairs.length >= 4;
    this.solveButton.onClick = function () {
       dialog.doSolve();
    };
@@ -894,7 +893,7 @@ function ManualSolverDialog() {
    this.applyButton.text = "Apply";
    this.applyButton.icon = this.scaledResource(":/icons/ok.png");
    this.applyButton.toolTip = "WCS を画像に適用";
-   this.applyButton.enabled = false;
+   this.applyButton.enabled = (this.wcsResult !== null && this.wcsResult.success);
    this.applyButton.onClick = function () {
       dialog.doApply();
    };
@@ -903,7 +902,8 @@ function ManualSolverDialog() {
    this.closeButton.text = "Close";
    this.closeButton.icon = this.scaledResource(":/icons/cancel.png");
    this.closeButton.onClick = function () {
-      dialog.cancel();
+      dialog.action = "close";
+      dialog.ok();
    };
 
    var mainButtonSizer = new HorizontalSizer;
@@ -926,76 +926,46 @@ function ManualSolverDialog() {
    // --- 画像変更時のコールバック ---
    this.imageCombo.onItemSelected = function (index) {
       dialog.updateImageInfo();
-      dialog.starPairs = [];
-      dialog.wcsResult = null;
-      dialog.refreshStarTable();
-      dialog.updateButtons();
+      var newId = dialog.getSelectedImageId();
+      if (newId !== dialog.selectedImageId) {
+         dialog.starPairs.length = 0;
+         dialog.wcsResult = null;
+         dialog.selectedImageId = newId;
+         dialog.refreshStarTable();
+         dialog.updateButtons();
+      }
    };
 
-   // 初期画像情報表示
+   // 初期状態
    this.updateImageInfo();
+   this.refreshStarTable();
 }
 
 ManualSolverDialog.prototype = new Dialog;
 
 //----------------------------------------------------------------------------
-// 選択中の ImageWindow を取得
+// 選択中の画像IDを取得
 //----------------------------------------------------------------------------
-ManualSolverDialog.prototype.getSelectedWindow = function () {
+ManualSolverDialog.prototype.getSelectedImageId = function () {
    var windows = ImageWindow.windows;
    var idx = this.imageCombo.currentItem;
    if (idx >= 0 && idx < windows.length) {
-      return windows[idx];
+      return windows[idx].mainView.id;
    }
-   return null;
+   return "";
 };
 
 //----------------------------------------------------------------------------
 // 画像情報の更新
 //----------------------------------------------------------------------------
 ManualSolverDialog.prototype.updateImageInfo = function () {
-   var window = this.getSelectedWindow();
-   if (!window || window.isNull) {
+   var w = getWindowById(this.getSelectedImageId());
+   if (!w || w.isNull) {
       this.imageSizeLabel.text = "";
       return;
    }
-   var image = window.mainView.image;
+   var image = w.mainView.image;
    this.imageSizeLabel.text = "(" + image.width + " x " + image.height + " px)";
-};
-
-//----------------------------------------------------------------------------
-// 星追加処理
-//----------------------------------------------------------------------------
-ManualSolverDialog.prototype.doAddStar = function () {
-   var window = this.getSelectedWindow();
-   if (!window || window.isNull) {
-      var mb = new MessageBox("画像が選択されていません。", TITLE, StdIcon_Error, StdButton_Ok);
-      mb.execute();
-      return;
-   }
-
-   var starData = { px: undefined, py: undefined, ra: undefined, dec: undefined, name: "" };
-   var editDlg = new StarEditDialog(this, this.starPairs.length + 1, starData);
-   if (editDlg.execute()) {
-      if (editDlg.accepted) {
-         // セントロイドスナップ
-         var image = window.mainView.image;
-         var px = editDlg.starData.px;
-         var py = editDlg.starData.py;
-         if (px >= 0 && px < image.width && py >= 0 && py < image.height) {
-            var centroid = computeCentroid(image, px, py, this.settings.centroidRadius);
-            if (centroid) {
-               console.writeln(format("Centroid snap: (%.2f, %.2f) -> (%.2f, %.2f)", px, py, centroid.x, centroid.y));
-               editDlg.starData.px = centroid.x;
-               editDlg.starData.py = centroid.y;
-            }
-         }
-         this.starPairs.push(editDlg.starData);
-         this.wcsResult = null;
-         this.refreshStarTable();
-         this.updateButtons();
-      }
-   }
 };
 
 //----------------------------------------------------------------------------
@@ -1037,14 +1007,14 @@ ManualSolverDialog.prototype.updateButtons = function () {
 // WCS ソルブ実行
 //----------------------------------------------------------------------------
 ManualSolverDialog.prototype.doSolve = function () {
-   var window = this.getSelectedWindow();
-   if (!window || window.isNull) {
+   var w = getWindowById(this.selectedImageId);
+   if (!w || w.isNull) {
       var mb = new MessageBox("画像が選択されていません。", TITLE, StdIcon_Error, StdButton_Ok);
       mb.execute();
       return;
    }
 
-   var image = window.mainView.image;
+   var image = w.mainView.image;
    var fitter = new WCSFitter(this.starPairs, image.width, image.height);
    this.wcsResult = fitter.solve();
 
@@ -1085,8 +1055,8 @@ ManualSolverDialog.prototype.doApply = function () {
       return;
    }
 
-   var window = this.getSelectedWindow();
-   if (!window || window.isNull) {
+   var w = getWindowById(this.selectedImageId);
+   if (!w || w.isNull) {
       var mb = new MessageBox("画像が選択されていません。", TITLE, StdIcon_Error, StdButton_Ok);
       mb.execute();
       return;
@@ -1104,7 +1074,7 @@ ManualSolverDialog.prototype.doApply = function () {
    if (mb.execute() !== StdButton_Yes) return;
 
    console.writeln("<b>WCS を画像に適用中...</b>");
-   applyWCS(window, this.wcsResult);
+   applyWCS(w, this.wcsResult);
    console.writeln("WCS を適用しました。");
 
    var mb2 = new MessageBox("WCS を正常に適用しました。", TITLE, StdIcon_Information, StdButton_Ok);
@@ -1127,10 +1097,109 @@ function main() {
    console.writeln("<b>" + TITLE + " v" + VERSION + "</b>");
    console.writeln("---");
 
-   // モードレスダイアログとして表示
-   // ユーザーが画像ウィンドウの Readout バーで座標を確認できるようにする
-   var dlg = new ManualSolverDialog();
-   dlg.execute();
+   var settings = new ManualSolverSettings();
+   settings.load();
+
+   var starPairs = [];
+   var wcsResult = null;
+   var selectedImageId = ImageWindow.activeWindow.mainView.id;
+
+   // マルチダイアログループ:
+   // Add Star / Edit 時にメインダイアログを閉じ、
+   // processEvents() で画像操作の時間を確保してから入力ダイアログを開く
+   for (;;) {
+      var dlg = new ManualSolverDialog(starPairs, wcsResult, selectedImageId);
+      dlg.execute();
+
+      // ダイアログからの状態を同期
+      starPairs = dlg.starPairs;
+      wcsResult = dlg.wcsResult;
+      selectedImageId = dlg.selectedImageId;
+
+      if (dlg.action === "close") {
+         break;
+      }
+
+      // Add Star / Edit: メインダイアログが閉じた状態で
+      // ユーザーに画像操作の時間を与える（3秒間）
+      if (dlg.action === "add_star" || dlg.action === "edit_star") {
+         console.writeln("");
+         console.writeln("<b>★ 画像ウィンドウで星の座標を確認してください（3秒間）</b>");
+         for (var countdown = 3; countdown > 0; countdown--) {
+            console.writeln("  " + countdown + " 秒後に入力ダイアログが開きます...");
+            for (var j = 0; j < 10; j++) {
+               processEvents();
+               msleep(100);
+            }
+         }
+         console.writeln("");
+      }
+
+      if (dlg.action === "add_star") {
+         var editDlg = new StarEditDialog(null, starPairs.length + 1, {
+            px: undefined, py: undefined, ra: undefined, dec: undefined, name: ""
+         });
+         if (editDlg.execute()) {
+            if (editDlg.accepted) {
+               // セントロイドスナップ
+               var w = getWindowById(selectedImageId);
+               if (w) {
+                  var img = w.mainView.image;
+                  var px = editDlg.starData.px;
+                  var py = editDlg.starData.py;
+                  if (px >= 0 && px < img.width && py >= 0 && py < img.height) {
+                     var centroid = computeCentroid(img, px, py, settings.centroidRadius);
+                     if (centroid) {
+                        console.writeln(format("Centroid snap: (%.2f, %.2f) -> (%.2f, %.2f)",
+                           px, py, centroid.x, centroid.y));
+                        editDlg.starData.px = centroid.x;
+                        editDlg.starData.py = centroid.y;
+                     }
+                  }
+               }
+               starPairs.push(editDlg.starData);
+               wcsResult = null;
+            }
+         }
+      }
+      else if (dlg.action === "edit_star") {
+         var idx = dlg.selectedIndex;
+         if (idx >= 0 && idx < starPairs.length) {
+            var starCopy = {
+               px: starPairs[idx].px,
+               py: starPairs[idx].py,
+               ra: starPairs[idx].ra,
+               dec: starPairs[idx].dec,
+               name: starPairs[idx].name
+            };
+            var editDlg = new StarEditDialog(null, idx + 1, starCopy);
+            if (editDlg.execute()) {
+               if (editDlg.accepted) {
+                  // セントロイドスナップ
+                  var w = getWindowById(selectedImageId);
+                  if (w) {
+                     var img = w.mainView.image;
+                     var px = editDlg.starData.px;
+                     var py = editDlg.starData.py;
+                     if (px >= 0 && px < img.width && py >= 0 && py < img.height) {
+                        var centroid = computeCentroid(img, px, py, settings.centroidRadius);
+                        if (centroid) {
+                           console.writeln(format("Centroid snap: (%.2f, %.2f) -> (%.2f, %.2f)",
+                              px, py, centroid.x, centroid.y));
+                           editDlg.starData.px = centroid.x;
+                           editDlg.starData.py = centroid.y;
+                        }
+                     }
+                  }
+                  starPairs[idx] = editDlg.starData;
+                  wcsResult = null;
+               }
+            }
+         }
+      }
+   }
+
+   settings.save();
 }
 
 main();
