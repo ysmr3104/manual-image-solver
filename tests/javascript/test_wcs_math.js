@@ -1,0 +1,482 @@
+//============================================================================
+// test_wcs_math.js - wcs_math.js の Node.js 単体テスト
+//
+// 実行方法: node tests/javascript/test_wcs_math.js
+//============================================================================
+
+var wcs = require("../../javascript/wcs_math.js");
+
+var tanProject = wcs.tanProject;
+var tanDeproject = wcs.tanDeproject;
+var angularSeparation = wcs.angularSeparation;
+var WCSFitter = wcs.WCSFitter;
+
+var passed = 0;
+var failed = 0;
+var testName = "";
+
+function assertEqual(actual, expected, msg, tolerance) {
+   if (typeof tolerance === "undefined") tolerance = 0;
+   var ok;
+   if (tolerance > 0) {
+      ok = Math.abs(actual - expected) <= tolerance;
+   } else {
+      ok = actual === expected;
+   }
+   if (!ok) {
+      console.log("  FAIL: " + msg);
+      console.log("    期待値: " + expected + ", 実際: " + actual);
+      if (tolerance > 0) console.log("    許容誤差: " + tolerance);
+      failed++;
+   } else {
+      passed++;
+   }
+}
+
+function assertTrue(val, msg) {
+   if (!val) {
+      console.log("  FAIL: " + msg);
+      failed++;
+   } else {
+      passed++;
+   }
+}
+
+function assertFalse(val, msg) {
+   if (val) {
+      console.log("  FAIL: " + msg);
+      failed++;
+   } else {
+      passed++;
+   }
+}
+
+function test(name, fn) {
+   testName = name;
+   console.log("[TEST] " + name);
+   try {
+      fn();
+   } catch (e) {
+      console.log("  ERROR: " + e.message);
+      console.log("  " + e.stack);
+      failed++;
+   }
+}
+
+//============================================================================
+// TAN投影の往復精度テスト
+//============================================================================
+
+test("TAN投影: 投影中心での往復", function () {
+   var crval = [180.0, 45.0];
+   var proj = tanProject(crval, [180.0, 45.0]);
+   assertEqual(proj[0], 0.0, "xi = 0", 1e-12);
+   assertEqual(proj[1], 0.0, "eta = 0", 1e-12);
+
+   var deproj = tanDeproject(crval, [0.0, 0.0]);
+   assertEqual(deproj[0], 180.0, "RA = 180", 1e-10);
+   assertEqual(deproj[1], 45.0, "DEC = 45", 1e-10);
+});
+
+test("TAN投影: 近傍点の往復精度 (< 1e-10 度)", function () {
+   var crval = [83.633, 22.014];  // オリオン座近傍
+   var testCoords = [
+      [83.822, -5.391],    // ベテルギウスの方向
+      [84.053, 21.142],    // 近傍
+      [82.500, 23.000],    // 近傍
+      [85.000, 20.500],    // 近傍
+   ];
+
+   for (var i = 0; i < testCoords.length; i++) {
+      var coord = testCoords[i];
+      var proj = tanProject(crval, coord);
+      assertTrue(proj !== null, "投影成功: [" + coord + "]");
+      var deproj = tanDeproject(crval, proj);
+      assertEqual(deproj[0], coord[0], "RA 往復 [" + coord + "]", 1e-10);
+      assertEqual(deproj[1], coord[1], "DEC 往復 [" + coord + "]", 1e-10);
+   }
+});
+
+test("TAN投影: RA=0 付近のラップアラウンド", function () {
+   var crval = [1.0, 30.0];
+   var coord = [359.0, 30.0];
+   var proj = tanProject(crval, coord);
+   assertTrue(proj !== null, "投影成功");
+   var deproj = tanDeproject(crval, proj);
+   assertEqual(deproj[0], coord[0], "RA 往復", 1e-10);
+   assertEqual(deproj[1], coord[1], "DEC 往復", 1e-10);
+});
+
+test("TAN投影: 天の南極付近", function () {
+   var crval = [0.0, -89.0];
+   var coord = [45.0, -88.5];
+   var proj = tanProject(crval, coord);
+   assertTrue(proj !== null, "投影成功");
+   var deproj = tanDeproject(crval, proj);
+   assertEqual(deproj[0], coord[0], "RA 往復", 1e-8);
+   assertEqual(deproj[1], coord[1], "DEC 往復", 1e-8);
+});
+
+test("TAN投影: 反対半球で null を返す", function () {
+   var crval = [0.0, 90.0];  // 天の北極
+   var coord = [0.0, -10.0]; // 反対半球
+   var proj = tanProject(crval, coord);
+   assertTrue(proj === null, "反対半球で null");
+});
+
+//============================================================================
+// 角距離テスト
+//============================================================================
+
+test("角距離: 同一点で 0", function () {
+   var sep = angularSeparation([83.822, -5.391], [83.822, -5.391]);
+   assertEqual(sep, 0.0, "同一点 = 0", 1e-12);
+});
+
+test("角距離: ベテルギウス ↔ リゲル", function () {
+   // ベテルギウス: RA 88.793, DEC +7.407
+   // リゲル: RA 78.634, DEC -8.202
+   var betelgeuse = [88.793, 7.407];
+   var rigel = [78.634, -8.202];
+   var sep = angularSeparation(betelgeuse, rigel);
+   // 文献値: 約 18.5 度
+   assertEqual(sep, 18.5, "ベテルギウス↔リゲル ≈ 18.5°", 0.5);
+});
+
+test("角距離: 天の極間 = 180°", function () {
+   var sep = angularSeparation([0.0, 90.0], [0.0, -90.0]);
+   assertEqual(sep, 180.0, "北極↔南極 = 180°", 1e-10);
+});
+
+test("角距離: 赤道上90°離れた点", function () {
+   var sep = angularSeparation([0.0, 0.0], [90.0, 0.0]);
+   assertEqual(sep, 90.0, "赤道上 90° 離れ", 1e-10);
+});
+
+//============================================================================
+// WCSFitter テスト
+//============================================================================
+
+test("WCSFitter: 3星未満でエラー", function () {
+   var fitter = new WCSFitter([
+      { px: 100, py: 100, ra: 10.0, dec: 20.0 },
+      { px: 200, py: 200, ra: 10.1, dec: 20.1 },
+      { px: 300, py: 300, ra: 10.2, dec: 20.2 },
+   ], 1000, 1000);
+   var result = fitter.solve();
+   assertFalse(result.success, "3星では失敗");
+   assertTrue(result.message.indexOf("4") >= 0, "エラーメッセージに '4' を含む");
+});
+
+test("WCSFitter: 不正な RA でエラー", function () {
+   var fitter = new WCSFitter([
+      { px: 100, py: 100, ra: 400.0, dec: 20.0 },
+      { px: 200, py: 200, ra: 10.0, dec: 20.0 },
+      { px: 300, py: 300, ra: 10.0, dec: 20.0 },
+      { px: 400, py: 400, ra: 10.0, dec: 20.0 },
+   ], 1000, 1000);
+   var result = fitter.solve();
+   assertFalse(result.success, "不正 RA で失敗");
+});
+
+test("WCSFitter: 不正な DEC でエラー", function () {
+   var fitter = new WCSFitter([
+      { px: 100, py: 100, ra: 10.0, dec: 95.0 },
+      { px: 200, py: 200, ra: 10.0, dec: 20.0 },
+      { px: 300, py: 300, ra: 10.0, dec: 20.0 },
+      { px: 400, py: 400, ra: 10.0, dec: 20.0 },
+   ], 1000, 1000);
+   var result = fitter.solve();
+   assertFalse(result.success, "不正 DEC で失敗");
+});
+
+test("WCSFitter: 既知WCSからの合成4星（最小構成）で残差 < 1 arcsec", function () {
+   // 既知の WCS パラメータ（典型的な星野写真）
+   // CRVAL = (180.0, 45.0), ピクセルスケール ≈ 1.5 arcsec/px
+   var knownCrval = [180.0, 45.0];
+   var knownCd = [
+      [-4.166667e-4, 0.0],   // -1.5 arcsec/px in RA
+      [0.0, 4.166667e-4]     // +1.5 arcsec/px in DEC
+   ];
+   var imgW = 6000, imgH = 4000;
+   var crpix1 = imgW / 2.0 + 0.5;
+   var crpix2 = imgH / 2.0 + 0.5;
+
+   // 4隅付近にテスト星を配置
+   var testPixels = [
+      { px: 500, py: 500 },
+      { px: 5500, py: 500 },
+      { px: 500, py: 3500 },
+      { px: 5500, py: 3500 },
+   ];
+
+   var starPairs = [];
+   for (var i = 0; i < testPixels.length; i++) {
+      var u = (testPixels[i].px + 1.0) - crpix1;
+      var v = (testPixels[i].py + 1.0) - crpix2;
+      var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
+      var eta = knownCd[1][0] * u + knownCd[1][1] * v;
+      var coord = tanDeproject(knownCrval, [xi, eta]);
+      starPairs.push({
+         px: testPixels[i].px,
+         py: testPixels[i].py,
+         ra: coord[0],
+         dec: coord[1],
+         name: "TestStar" + (i + 1)
+      });
+   }
+
+   var fitter = new WCSFitter(starPairs, imgW, imgH);
+   var result = fitter.solve();
+
+   assertTrue(result.success, "フィット成功");
+   assertTrue(result.rms_arcsec < 1.0, "RMS < 1 arcsec (実際: " + result.rms_arcsec + ")");
+   assertEqual(result.crpix1, crpix1, "CRPIX1 一致", 0.01);
+   assertEqual(result.crpix2, crpix2, "CRPIX2 一致", 0.01);
+});
+
+test("WCSFitter: 既知WCSからの合成6星で残差 < 0.01 arcsec", function () {
+   var knownCrval = [83.633, 22.014];
+   var knownCd = [
+      [-3.5e-4, 1.0e-5],
+      [1.0e-5, 3.5e-4]
+   ];
+   var imgW = 6024, imgH = 4024;
+   var crpix1 = imgW / 2.0 + 0.5;
+   var crpix2 = imgH / 2.0 + 0.5;
+
+   var testPixels = [
+      { px: 300, py: 300 },
+      { px: 3000, py: 300 },
+      { px: 5700, py: 300 },
+      { px: 300, py: 3700 },
+      { px: 3000, py: 3700 },
+      { px: 5700, py: 3700 },
+   ];
+
+   var starPairs = [];
+   for (var i = 0; i < testPixels.length; i++) {
+      var u = (testPixels[i].px + 1.0) - crpix1;
+      var v = (testPixels[i].py + 1.0) - crpix2;
+      var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
+      var eta = knownCd[1][0] * u + knownCd[1][1] * v;
+      var coord = tanDeproject(knownCrval, [xi, eta]);
+      starPairs.push({
+         px: testPixels[i].px,
+         py: testPixels[i].py,
+         ra: coord[0],
+         dec: coord[1],
+         name: "TestStar" + (i + 1)
+      });
+   }
+
+   var fitter = new WCSFitter(starPairs, imgW, imgH);
+   var result = fitter.solve();
+
+   assertTrue(result.success, "フィット成功");
+   assertTrue(result.rms_arcsec < 0.01,
+      "RMS < 0.01 arcsec (実際: " + result.rms_arcsec + ")");
+});
+
+test("WCSFitter: 合成10星で高精度フィット", function () {
+   var knownCrval = [200.0, -30.0];
+   var knownCd = [
+      [-2.778e-4, 0.0],
+      [0.0, 2.778e-4]
+   ];
+   var imgW = 4000, imgH = 4000;
+   var crpix1 = imgW / 2.0 + 0.5;
+   var crpix2 = imgH / 2.0 + 0.5;
+
+   var testPixels = [
+      { px: 200, py: 200 },
+      { px: 2000, py: 200 },
+      { px: 3800, py: 200 },
+      { px: 200, py: 2000 },
+      { px: 2000, py: 2000 },
+      { px: 3800, py: 2000 },
+      { px: 200, py: 3800 },
+      { px: 2000, py: 3800 },
+      { px: 3800, py: 3800 },
+      { px: 1000, py: 1000 },
+   ];
+
+   var starPairs = [];
+   for (var i = 0; i < testPixels.length; i++) {
+      var u = (testPixels[i].px + 1.0) - crpix1;
+      var v = (testPixels[i].py + 1.0) - crpix2;
+      var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
+      var eta = knownCd[1][0] * u + knownCd[1][1] * v;
+      var coord = tanDeproject(knownCrval, [xi, eta]);
+      starPairs.push({
+         px: testPixels[i].px,
+         py: testPixels[i].py,
+         ra: coord[0],
+         dec: coord[1],
+         name: "Star" + (i + 1)
+      });
+   }
+
+   var fitter = new WCSFitter(starPairs, imgW, imgH);
+   var result = fitter.solve();
+
+   assertTrue(result.success, "フィット成功");
+   assertTrue(result.rms_arcsec < 0.01,
+      "RMS < 0.01 arcsec (実際: " + result.rms_arcsec + ")");
+
+   // CD 行列の各要素を検証
+   assertEqual(result.cd[0][0], knownCd[0][0], "CD1_1", 1e-8);
+   assertEqual(result.cd[0][1], knownCd[0][1], "CD1_2", 1e-8);
+   assertEqual(result.cd[1][0], knownCd[1][0], "CD2_1", 1e-8);
+   assertEqual(result.cd[1][1], knownCd[1][1], "CD2_2", 1e-8);
+});
+
+test("WCSFitter: CRVAL 初期値が 5度ずれても収束", function () {
+   // 正しい WCS
+   var knownCrval = [120.0, 10.0];
+   var knownCd = [
+      [-5.0e-4, 0.0],
+      [0.0, 5.0e-4]
+   ];
+   var imgW = 4000, imgH = 3000;
+   var crpix1 = imgW / 2.0 + 0.5;
+   var crpix2 = imgH / 2.0 + 0.5;
+
+   var testPixels = [
+      { px: 200, py: 200 },
+      { px: 3800, py: 200 },
+      { px: 200, py: 2800 },
+      { px: 3800, py: 2800 },
+      { px: 2000, py: 1500 },
+   ];
+
+   var starPairs = [];
+   for (var i = 0; i < testPixels.length; i++) {
+      var u = (testPixels[i].px + 1.0) - crpix1;
+      var v = (testPixels[i].py + 1.0) - crpix2;
+      var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
+      var eta = knownCd[1][0] * u + knownCd[1][1] * v;
+      var coord = tanDeproject(knownCrval, [xi, eta]);
+      starPairs.push({
+         px: testPixels[i].px,
+         py: testPixels[i].py,
+         ra: coord[0],
+         dec: coord[1],
+         name: "Star" + (i + 1)
+      });
+   }
+
+   var fitter = new WCSFitter(starPairs, imgW, imgH);
+   var result = fitter.solve();
+
+   assertTrue(result.success, "フィット成功");
+   assertTrue(result.rms_arcsec < 0.1,
+      "RMS < 0.1 arcsec (実際: " + result.rms_arcsec + ")");
+   // CRVAL が元の値に近いことを確認
+   assertEqual(result.crval1, knownCrval[0], "CRVAL1 収束", 0.01);
+   assertEqual(result.crval2, knownCrval[1], "CRVAL2 収束", 0.01);
+});
+
+test("WCSFitter: 回転した CD 行列のフィット", function () {
+   // 30度回転した WCS
+   var angle = 30.0 * Math.PI / 180.0;
+   var scale = 3.0e-4; // 度/px
+   var knownCrval = [45.0, 60.0];
+   var knownCd = [
+      [-scale * Math.cos(angle), scale * Math.sin(angle)],
+      [-scale * Math.sin(angle), -scale * Math.cos(angle)]
+   ];
+   var imgW = 5000, imgH = 3000;
+   var crpix1 = imgW / 2.0 + 0.5;
+   var crpix2 = imgH / 2.0 + 0.5;
+
+   var testPixels = [
+      { px: 500, py: 500 },
+      { px: 4500, py: 500 },
+      { px: 500, py: 2500 },
+      { px: 4500, py: 2500 },
+      { px: 2500, py: 1500 },
+      { px: 1500, py: 1000 },
+   ];
+
+   var starPairs = [];
+   for (var i = 0; i < testPixels.length; i++) {
+      var u = (testPixels[i].px + 1.0) - crpix1;
+      var v = (testPixels[i].py + 1.0) - crpix2;
+      var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
+      var eta = knownCd[1][0] * u + knownCd[1][1] * v;
+      var coord = tanDeproject(knownCrval, [xi, eta]);
+      starPairs.push({
+         px: testPixels[i].px,
+         py: testPixels[i].py,
+         ra: coord[0],
+         dec: coord[1],
+         name: "Star" + (i + 1)
+      });
+   }
+
+   var fitter = new WCSFitter(starPairs, imgW, imgH);
+   var result = fitter.solve();
+
+   assertTrue(result.success, "フィット成功");
+   assertTrue(result.rms_arcsec < 0.01,
+      "RMS < 0.01 arcsec (実際: " + result.rms_arcsec + ")");
+   assertEqual(result.cd[0][0], knownCd[0][0], "CD1_1", 1e-7);
+   assertEqual(result.cd[0][1], knownCd[0][1], "CD1_2", 1e-7);
+   assertEqual(result.cd[1][0], knownCd[1][0], "CD2_1", 1e-7);
+   assertEqual(result.cd[1][1], knownCd[1][1], "CD2_2", 1e-7);
+});
+
+test("WCSFitter: ピクセルスケールの検証", function () {
+   var scale = 2.0e-4; // 0.72 arcsec/px
+   var knownCrval = [0.0, 0.0];
+   var knownCd = [
+      [-scale, 0.0],
+      [0.0, scale]
+   ];
+   var imgW = 2000, imgH = 2000;
+   var crpix1 = imgW / 2.0 + 0.5;
+   var crpix2 = imgH / 2.0 + 0.5;
+
+   var testPixels = [
+      { px: 200, py: 200 },
+      { px: 1800, py: 200 },
+      { px: 200, py: 1800 },
+      { px: 1800, py: 1800 },
+   ];
+
+   var starPairs = [];
+   for (var i = 0; i < testPixels.length; i++) {
+      var u = (testPixels[i].px + 1.0) - crpix1;
+      var v = (testPixels[i].py + 1.0) - crpix2;
+      var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
+      var eta = knownCd[1][0] * u + knownCd[1][1] * v;
+      var coord = tanDeproject(knownCrval, [xi, eta]);
+      starPairs.push({
+         px: testPixels[i].px,
+         py: testPixels[i].py,
+         ra: coord[0],
+         dec: coord[1],
+         name: "Star" + (i + 1)
+      });
+   }
+
+   var fitter = new WCSFitter(starPairs, imgW, imgH);
+   var result = fitter.solve();
+
+   assertTrue(result.success, "フィット成功");
+   // ピクセルスケール = scale * 3600 = 0.72 arcsec/px
+   assertEqual(result.pixelScale_arcsec, scale * 3600.0, "ピクセルスケール", 0.01);
+});
+
+//============================================================================
+// 結果サマリー
+//============================================================================
+
+console.log("\n========================================");
+console.log("結果: " + passed + " passed, " + failed + " failed");
+console.log("========================================");
+
+if (failed > 0) {
+   process.exit(1);
+}
