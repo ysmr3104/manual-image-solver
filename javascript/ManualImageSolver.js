@@ -110,10 +110,10 @@ function decToDMS(decDeg) {
 }
 
 // ピクセル座標 → 天球座標変換（WCS JSON の wcs オブジェクト使用）
-// imageHeight: 画像の高さ（ピクセル）。Y軸を FITS 規格（下起点）に変換するために必要。
-function pixelToRaDec(wcs, px, py, imageHeight) {
-   var u = (px + 1.0) - wcs.crpix1;  // X: 0-based左起点 → FITS 1-based左起点
-   var v = (imageHeight - py) - wcs.crpix2;  // Y: 0-based上起点 → FITS 1-based下起点
+// PixInsight は FITS データを上から下の順で書くため、fits_y = py + 1（フリップなし）。
+function pixelToRaDec(wcs, px, py) {
+   var u = (px + 1.0) - wcs.crpix1;
+   var v = (py + 1.0) - wcs.crpix2;
    var xi  = wcs.cd1_1 * u + wcs.cd1_2 * v;
    var eta = wcs.cd2_1 * u + wcs.cd2_2 * v;
    return tanDeproject([wcs.crval1, wcs.crval2], [xi, eta]);
@@ -122,11 +122,11 @@ function pixelToRaDec(wcs, px, py, imageHeight) {
 // 画像四隅・中央の座標をコンソールに表示
 function displayImageCoordinates(wcsData, imageWidth, imageHeight) {
    var wcs = wcsData.wcs;
-   var center = pixelToRaDec(wcs, imageWidth / 2.0, imageHeight / 2.0, imageHeight);
-   var tl = pixelToRaDec(wcs, 0, 0, imageHeight);
-   var tr = pixelToRaDec(wcs, imageWidth - 1, 0, imageHeight);
-   var bl = pixelToRaDec(wcs, 0, imageHeight - 1, imageHeight);
-   var br = pixelToRaDec(wcs, imageWidth - 1, imageHeight - 1, imageHeight);
+   var center = pixelToRaDec(wcs, imageWidth / 2.0, imageHeight / 2.0);
+   var tl = pixelToRaDec(wcs, 0, 0);
+   var tr = pixelToRaDec(wcs, imageWidth - 1, 0);
+   var bl = pixelToRaDec(wcs, 0, imageHeight - 1);
+   var br = pixelToRaDec(wcs, imageWidth - 1, imageHeight - 1);
 
    console.writeln("");
    console.writeln("<b>Image coordinates:</b>");
@@ -195,7 +195,7 @@ function applyWCSFromJSON(window, wcsData) {
 
    // 画像中心の RA/DEC を OBJCTRA/OBJCTDEC として書き込み（ImageSolver 互換）
    var imgCenter = pixelToRaDec(wcs,
-      wcsData.image.width / 2.0, wcsData.image.height / 2.0, wcsData.image.height);
+      wcsData.image.width / 2.0, wcsData.image.height / 2.0);
    cleanedKw.push(makeFITSKeyword("OBJCTRA", raToHMS(imgCenter[0])));
    cleanedKw.push(makeFITSKeyword("OBJCTDEC", decToDMS(imgCenter[1])));
 

@@ -40,14 +40,6 @@ def load_image(filepath):
     # RGB データも返す（カラー表示用）
     rgb_data = _to_rgb_hwc(data)
 
-    # FITS は行0が画像下端（FITS規格: Y=1が下）。
-    # Python GUI で PixInsight と同じ向き（行0=画像上端）にするため上下反転。
-    # XISF は行0が画像上端なのでそのまま。
-    if fmt == "FITS":
-        data_2d = np.flipud(data_2d)
-        if rgb_data is not None:
-            rgb_data = np.flipud(rgb_data)
-
     metadata = {
         "width": data_2d.shape[1],
         "height": data_2d.shape[0],

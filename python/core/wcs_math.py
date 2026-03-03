@@ -212,10 +212,10 @@ class WCSFitter:
                 }
 
             # ピクセルオフセット u, v（CRPIX 基準）
-            # X: px は 0-based 左起点、FITS も左起点 → fits_x = px + 1
-            # Y: py は 0-based 上起点、FITS は下起点 → fits_y = height - py
+            # PixInsight は FITS データを上から下の順で書くため、
+            # FITS row 1 = 画像上端。fits_y = py + 1（フリップなし）。
             u_arr = [(s["px"] + 1.0) - crpix1 for s in stars]
-            v_arr = [(self.height - s["py"]) - crpix2 for s in stars]
+            v_arr = [(s["py"] + 1.0) - crpix2 for s in stars]
 
             # 正規方程式の各項を計算
             sum_uu = 0.0
@@ -271,7 +271,7 @@ class WCSFitter:
 
         for i, s in enumerate(stars):
             u = (s["px"] + 1.0) - crpix1
-            v = (self.height - s["py"]) - crpix2
+            v = (s["py"] + 1.0) - crpix2
 
             pred_xi = cd[0][0] * u + cd[0][1] * v
             pred_eta = cd[1][0] * u + cd[1][1] * v
