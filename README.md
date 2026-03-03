@@ -185,6 +185,16 @@ PJSR 統合テスト: PixInsight で **Script > Run Script File...** → `tests/
 
 詳細は [docs/specs.md](docs/specs.md) を参照。
 
+## 配布方法について
+
+本ツールは PixInsight の[アップデートリポジトリ](https://pixinsight.com/doc/docs/PIRepositoryReference/PIRepositoryReference.html)による配布を検討しましたが、以下の理由により GitHub での配布としています。
+
+- **PJSR の制約**: PixInsight の PJSR スクリプトは実行中コンソールがモーダルになるため、画像上で星をクリックして選択するインタラクティブな操作ができません。そのため Python GUI（PyQt6 + matplotlib）を外部プロセスとして起動する設計を採用しています。
+- **外部依存の問題**: PixInsight のアップデートリポジトリは PJSR スクリプトやネイティブモジュールの配布を想定しており、Python 環境を内包する仕組みがありません。
+- **ネイティブモジュール化の断念**: C++/PCL の `ProcessInterface` として実装すれば画像上でのインタラクティブ操作が可能になり、リポジトリ配布もできますが、macOS / Linux / Windows の 3 プラットフォーム分のビルド環境が必要となるため、現時点では対応が困難です。
+
+そのため、本リポジトリを clone し、セットアップ手順に従って Python 環境を構築していただく形での利用をお願いしています。
+
 ## ライセンス
 
 Copyright (c) 2024-2025 Split Image Solver Project
