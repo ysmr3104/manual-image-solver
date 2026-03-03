@@ -465,7 +465,6 @@ function ImagePreviewControl(parent) {
    this.zoomLevel = 1.0;      // 表示ズーム倍率
    this.starMarkers = [];     // [{imgX, imgY, index}]
    this.selectedIndex = -1;   // 選択中のマーカーindex
-   this.mode = "select";      // "select" or "pan"
    this.onImageClick = null;  // コールバック: function(imgX, imgY)
 
    // 手動スクロール管理
@@ -474,10 +473,11 @@ function ImagePreviewControl(parent) {
    this.maxScrollX = 0;
    this.maxScrollY = 0;
 
-   // パン用
-   this.isPanning = false;
-   this.panStartX = 0;
-   this.panStartY = 0;
+   // ドラッグ/クリック判定用
+   this.isDragging = false;    // マウスボタン押下中
+   this.hasMoved = false;      // ドラッグ閾値を超えたか
+   this.dragStartX = 0;
+   this.dragStartY = 0;
    this.panScrollX = 0;
    this.panScrollY = 0;
 
@@ -550,23 +550,46 @@ function ImagePreviewControl(parent) {
    };
 
    // --- マウスイベント ---
+   // 左クリック = 星選択、左ドラッグ = パン、中ボタンドラッグ = パン
+   #define DRAG_THRESHOLD 4
+
    this.viewport.onMousePress = function (x, y, button, buttonState, modifiers) {
       if (!self.bitmap) return;
 
-      // 中ボタンまたは Pan モードの左ボタンでパン開始
-      if (button === 4 || (button === 1 && self.mode === "pan")) {
-         self.isPanning = true;
-         self.panStartX = x;
-         self.panStartY = y;
+      if (button === 1 || button === 4) {
+         self.isDragging = true;
+         self.hasMoved = false;
+         self.dragStartX = x;
+         self.dragStartY = y;
          self.panScrollX = self.scrollX;
          self.panScrollY = self.scrollY;
-         self.viewport.cursor = new Cursor(StdCursor_ClosedHand);
-         return;
+      }
+   };
+
+   this.viewport.onMouseMove = function (x, y, buttonState, modifiers) {
+      if (!self.isDragging) return;
+
+      var dx = x - self.dragStartX;
+      var dy = y - self.dragStartY;
+
+      // 閾値を超えたらドラッグ（パン）開始
+      if (!self.hasMoved) {
+         if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
+            self.hasMoved = true;
+            self.viewport.cursor = new Cursor(StdCursor_ClosedHand);
+         }
       }
 
-      // Select モードの左クリック
-      if (button === 1 && self.mode === "select") {
-         // 表示座標 → 画像座標
+      if (self.hasMoved) {
+         self.setScroll(self.panScrollX - dx, self.panScrollY - dy);
+      }
+   };
+
+   this.viewport.onMouseRelease = function (x, y, button, buttonState, modifiers) {
+      if (!self.isDragging) return;
+
+      if (!self.hasMoved && button === 1) {
+         // クリック（移動なし）→ 星選択
          var imgX = (x + self.scrollX) / (self.bitmapScale * self.zoomLevel);
          var imgY = (y + self.scrollY) / (self.bitmapScale * self.zoomLevel);
 
@@ -574,25 +597,10 @@ function ImagePreviewControl(parent) {
             self.onImageClick(imgX, imgY);
          }
       }
-   };
 
-   this.viewport.onMouseMove = function (x, y, buttonState, modifiers) {
-      if (self.isPanning) {
-         var dx = x - self.panStartX;
-         var dy = y - self.panStartY;
-         self.setScroll(self.panScrollX - dx, self.panScrollY - dy);
-      }
-   };
-
-   this.viewport.onMouseRelease = function (x, y, button, buttonState, modifiers) {
-      if (self.isPanning) {
-         self.isPanning = false;
-         if (self.mode === "pan") {
-            self.viewport.cursor = new Cursor(StdCursor_OpenHand);
-         } else {
-            self.viewport.cursor = new Cursor(StdCursor_Arrow);
-         }
-      }
+      self.isDragging = false;
+      self.hasMoved = false;
+      self.viewport.cursor = new Cursor(StdCursor_Arrow);
    };
 
    this.viewport.onMouseWheel = function (x, y, delta, buttonState, modifiers) {
@@ -769,15 +777,6 @@ ImagePreviewControl.prototype.zoomOut = function () {
    if (newIdx >= 0) {
       this.zoomIndex = newIdx;
       this.zoomAroundCenter(this.zoomLevels[this.zoomIndex]);
-   }
-};
-
-ImagePreviewControl.prototype.setMode = function (mode) {
-   this.mode = mode;
-   if (mode === "pan") {
-      this.viewport.cursor = new Cursor(StdCursor_OpenHand);
-   } else {
-      this.viewport.cursor = new Cursor(StdCursor_Arrow);
    }
 };
 
@@ -1004,35 +1003,41 @@ function ManualSolverDialog(targetWindow) {
       self.preview.zoomOut();
    };
 
-   this.selectRadio = new RadioButton(this);
-   this.selectRadio.text = "Select";
-   this.selectRadio.checked = true;
-   this.selectRadio.toolTip = "クリックで星を選択";
-   this.selectRadio.onCheck = function (checked) {
-      if (checked) self.preview.setMode("select");
-   };
-
-   this.panRadio = new RadioButton(this);
-   this.panRadio.text = "Pan";
-   this.panRadio.toolTip = "ドラッグで画像をパン";
-   this.panRadio.onCheck = function (checked) {
-      if (checked) self.preview.setMode("pan");
-   };
-
    var stretchLabel = new Label(this);
-   stretchLabel.text = "Stretch:";
+   stretchLabel.text = "STF:";
    stretchLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
 
-   this.stretchComboBox = new ComboBox(this);
-   this.stretchComboBox.addItem("No Stretch");
-   this.stretchComboBox.addItem("Linked");
-   this.stretchComboBox.addItem("Unlinked");
-   this.stretchComboBox.currentItem = 1; // Linked がデフォルト
-   this.stretchComboBox.toolTip = "オートストレッチモード";
-   this.stretchComboBox.onItemSelected = function (index) {
-      var modes = ["none", "linked", "unlinked"];
-      self.stretchMode = modes[index];
-      self.rebuildBitmap();
+   this.stretchNoneButton = new PushButton(this);
+   this.stretchNoneButton.text = "None";
+   this.stretchNoneButton.toolTip = "ストレッチなし（リニア表示）";
+   this.stretchNoneButton.onClick = function () {
+      if (self.stretchMode !== "none") {
+         self.stretchMode = "none";
+         self.updateStretchButtons();
+         self.rebuildBitmap();
+      }
+   };
+
+   this.stretchLinkedButton = new PushButton(this);
+   this.stretchLinkedButton.text = "\u25B6Linked";  // デフォルト: アクティブ
+   this.stretchLinkedButton.toolTip = "全チャンネル同一ストレッチ";
+   this.stretchLinkedButton.onClick = function () {
+      if (self.stretchMode !== "linked") {
+         self.stretchMode = "linked";
+         self.updateStretchButtons();
+         self.rebuildBitmap();
+      }
+   };
+
+   this.stretchUnlinkedButton = new PushButton(this);
+   this.stretchUnlinkedButton.text = "Unlinked";
+   this.stretchUnlinkedButton.toolTip = "チャンネル独立ストレッチ";
+   this.stretchUnlinkedButton.onClick = function () {
+      if (self.stretchMode !== "unlinked") {
+         self.stretchMode = "unlinked";
+         self.updateStretchButtons();
+         self.rebuildBitmap();
+      }
    };
 
    var toolbarSizer = new HorizontalSizer;
@@ -1042,11 +1047,10 @@ function ManualSolverDialog(targetWindow) {
    toolbarSizer.add(this.zoomInButton);
    toolbarSizer.add(this.zoomOutButton);
    toolbarSizer.addSpacing(12);
-   toolbarSizer.add(this.selectRadio);
-   toolbarSizer.add(this.panRadio);
-   toolbarSizer.addSpacing(12);
    toolbarSizer.add(stretchLabel);
-   toolbarSizer.add(this.stretchComboBox);
+   toolbarSizer.add(this.stretchNoneButton);
+   toolbarSizer.add(this.stretchLinkedButton);
+   toolbarSizer.add(this.stretchUnlinkedButton);
    toolbarSizer.addStretch();
 
    // --- ImagePreviewControl ---
@@ -1072,7 +1076,8 @@ function ManualSolverDialog(targetWindow) {
    this.starTreeBox.setHeaderText(3, "Name");
    this.starTreeBox.setHeaderText(4, "RA / DEC");
    this.starTreeBox.setHeaderText(5, "Residual");
-   this.starTreeBox.setColumnWidth(0, 30);
+   this.starTreeBox.setHeaderAlignment(0, TextAlign_Left | TextAlign_VertCenter);
+   this.starTreeBox.setColumnWidth(0, 45);
    this.starTreeBox.setColumnWidth(1, 70);
    this.starTreeBox.setColumnWidth(2, 70);
    this.starTreeBox.setColumnWidth(3, 120);
@@ -1257,6 +1262,7 @@ ManualSolverDialog.prototype.refreshAll = function () {
       var s = this.starPairs[i];
       var node = new TreeBoxNode(this.starTreeBox);
       node.setText(0, "" + (i + 1));
+      node.setAlignment(0, TextAlign_Left | TextAlign_VertCenter);
       node.setText(1, s.px.toFixed(1));
       node.setText(2, s.py.toFixed(1));
       node.setText(3, s.name || "");
@@ -1298,12 +1304,21 @@ ManualSolverDialog.prototype.refreshAll = function () {
 // Bitmap 再生成（ストレッチモード変更時）
 //----------------------------------------------------------------------------
 
+ManualSolverDialog.prototype.updateStretchButtons = function () {
+   this.stretchNoneButton.text = (this.stretchMode === "none") ? "\u25B6None" : "None";
+   this.stretchLinkedButton.text = (this.stretchMode === "linked") ? "\u25B6Linked" : "Linked";
+   this.stretchUnlinkedButton.text = (this.stretchMode === "unlinked") ? "\u25B6Unlinked" : "Unlinked";
+};
+
 ManualSolverDialog.prototype.rebuildBitmap = function () {
+   this.cursor = new Cursor(StdCursor_Wait);
+   processEvents();
    console.writeln("Bitmap を再生成中（" + this.stretchMode + "）...");
    console.flush();
    var bmpResult = createStretchedBitmap(this.image, MAX_BITMAP_EDGE, this.stretchMode);
    this.preview.setBitmap(bmpResult);
    console.writeln("  完了。");
+   this.cursor = new Cursor(StdCursor_Arrow);
 };
 
 //----------------------------------------------------------------------------
@@ -1481,10 +1496,7 @@ function main() {
       dlg.starPairs = restoredStarPairs;
       if (restoredStretchMode && restoredStretchMode !== dlg.stretchMode) {
          dlg.stretchMode = restoredStretchMode;
-         var modeIndex = { "none": 0, "linked": 1, "unlinked": 2 };
-         if (typeof modeIndex[restoredStretchMode] !== "undefined") {
-            dlg.stretchComboBox.currentItem = modeIndex[restoredStretchMode];
-         }
+         dlg.updateStretchButtons();
          dlg.rebuildBitmap();
       }
       dlg.refreshAll();
