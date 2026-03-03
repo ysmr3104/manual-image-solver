@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# 仮想環境
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# テスト
+.pytest_cache/
+htmlcov/
+.coverage
+
+# ハンドオーバー
+HANDOVER.md
+
+# WCS JSON 出力（ユーザー生成）
+*.wcs.json
