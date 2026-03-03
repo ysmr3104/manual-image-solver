@@ -1144,11 +1144,28 @@ function ManualSolverDialog(targetWindow) {
       }
    };
 
+   this.exportButton = new PushButton(this);
+   this.exportButton.text = "Export...";
+   this.exportButton.toolTip = "星ペアデータを JSON ファイルに書き出し";
+   this.exportButton.onClick = function () {
+      self.doExport();
+   };
+
+   this.importButton = new PushButton(this);
+   this.importButton.text = "Import...";
+   this.importButton.toolTip = "JSON ファイルから星ペアデータを読み込み";
+   this.importButton.onClick = function () {
+      self.doImport();
+   };
+
    var starButtonSizer = new HorizontalSizer;
    starButtonSizer.spacing = 4;
    starButtonSizer.add(this.editStarButton);
    starButtonSizer.add(this.removeStarButton);
    starButtonSizer.add(this.clearStarsButton);
+   starButtonSizer.addSpacing(12);
+   starButtonSizer.add(this.exportButton);
+   starButtonSizer.add(this.importButton);
    starButtonSizer.addStretch();
 
    // --- ステータスラベル ---
@@ -1447,6 +1464,144 @@ ManualSolverDialog.prototype.saveSessionData = function () {
       );
       console.writeln("セッションデータを保存しました（星 " + this.starPairs.length + " 個）。");
    }
+};
+
+//----------------------------------------------------------------------------
+// Export: 星ペアデータを JSON ファイルに書き出し
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.doExport = function () {
+   if (this.starPairs.length === 0) {
+      var mb = new MessageBox("エクスポートする星ペアがありません。",
+         TITLE, StdIcon_Warning, StdButton_Ok);
+      mb.execute();
+      return;
+   }
+
+   var sfd = new SaveFileDialog;
+   sfd.caption = "星ペアデータをエクスポート";
+   sfd.filters = [["JSON files", "*.json"]];
+   sfd.selectedFileExtension = ".json";
+
+   if (!sfd.execute()) return;
+
+   var data = {
+      imageId: this.targetWindow.mainView.id,
+      imageWidth: this.image.width,
+      imageHeight: this.image.height,
+      stretchMode: this.stretchMode,
+      starPairs: []
+   };
+   for (var i = 0; i < this.starPairs.length; i++) {
+      var s = this.starPairs[i];
+      data.starPairs.push({
+         px: s.px, py: s.py,
+         ra: s.ra, dec: s.dec,
+         name: s.name || ""
+      });
+   }
+
+   var json = JSON.stringify(data, null, 2);
+   try {
+      var f = new File;
+      f.createForWriting(sfd.fileName);
+      f.write(ByteArray.stringToUTF8(json));
+      f.close();
+      console.writeln("星ペアデータをエクスポートしました: " + sfd.fileName);
+      var mb = new MessageBox("星ペアデータをエクスポートしました（" + this.starPairs.length + " 個）。",
+         TITLE, StdIcon_Information, StdButton_Ok);
+      mb.execute();
+   } catch (e) {
+      var mb = new MessageBox("ファイルの書き込みに失敗しました:\n" + e.message,
+         TITLE, StdIcon_Error, StdButton_Ok);
+      mb.execute();
+   }
+};
+
+//----------------------------------------------------------------------------
+// Import: JSON ファイルから星ペアデータを読み込み
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.doImport = function () {
+   var ofd = new OpenFileDialog;
+   ofd.caption = "星ペアデータをインポート";
+   ofd.filters = [["JSON files", "*.json"]];
+
+   if (!ofd.execute()) return;
+
+   try {
+      var f = new File;
+      f.openForReading(ofd.fileName);
+      var buf = f.read(DataType_ByteArray, f.size);
+      f.close();
+      var json = buf.utf8ToString();
+      var data = JSON.parse(json);
+   } catch (e) {
+      var mb = new MessageBox("ファイルの読み込みに失敗しました:\n" + e.message,
+         TITLE, StdIcon_Error, StdButton_Ok);
+      mb.execute();
+      return;
+   }
+
+   if (!data || !data.starPairs || data.starPairs.length === 0) {
+      var mb = new MessageBox("有効な星ペアデータが含まれていません。",
+         TITLE, StdIcon_Warning, StdButton_Ok);
+      mb.execute();
+      return;
+   }
+
+   // 画像サイズチェック
+   if (data.imageWidth && data.imageHeight) {
+      if (data.imageWidth !== this.image.width || data.imageHeight !== this.image.height) {
+         var mb = new MessageBox(
+            "画像サイズが一致しません。\n"
+            + "ファイル: " + data.imageWidth + " x " + data.imageHeight + "\n"
+            + "現在の画像: " + this.image.width + " x " + this.image.height + "\n\n"
+            + "それでもインポートしますか？",
+            TITLE, StdIcon_Warning, StdButton_Yes, StdButton_No);
+         if (mb.execute() !== StdButton_Yes) return;
+      }
+   }
+
+   // 既存の星ペアがある場合の確認
+   if (this.starPairs.length > 0) {
+      var mb = new MessageBox(
+         "現在の星ペア（" + this.starPairs.length + " 個）を置き換えますか？\n"
+         + "「No」を選ぶと追加されます。",
+         TITLE, StdIcon_Question, StdButton_Yes, StdButton_No);
+      if (mb.execute() === StdButton_Yes) {
+         this.starPairs = [];
+      }
+   }
+
+   // 星ペアを追加
+   for (var i = 0; i < data.starPairs.length; i++) {
+      var s = data.starPairs[i];
+      if (typeof s.px === "number" && typeof s.py === "number"
+         && typeof s.ra === "number" && typeof s.dec === "number") {
+         this.starPairs.push({
+            px: s.px, py: s.py,
+            ra: s.ra, dec: s.dec,
+            name: s.name || ""
+         });
+      }
+   }
+
+   // ストレッチモード復元
+   if (data.stretchMode && data.stretchMode !== this.stretchMode) {
+      var modes = ["none", "linked", "unlinked"];
+      if (modes.indexOf(data.stretchMode) >= 0) {
+         this.stretchMode = data.stretchMode;
+         this.updateStretchButtons();
+         this.rebuildBitmap();
+      }
+   }
+
+   this.wcsResult = null;
+   this.refreshAll();
+
+   console.writeln("星ペアデータをインポートしました: " + ofd.fileName
+      + "（" + data.starPairs.length + " 個）");
 };
 
 //============================================================================
