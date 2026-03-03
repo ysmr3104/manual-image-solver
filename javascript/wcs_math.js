@@ -187,12 +187,14 @@ WCSFitter.prototype.solve = function () {
          };
       }
 
-      // ピクセルオフセット u, v（0-based ピクセル座標 → FITS 1-based CRPIX 基準）
+      // ピクセルオフセット u, v（CRPIX 基準）
+      // X: px は 0-based 左起点、FITS も左起点 → fits_x = px + 1
+      // Y: py は 0-based 上起点、FITS は下起点 → fits_y = height - py
       var uArr = [];
       var vArr = [];
       for (var i = 0; i < nStars; i++) {
-         uArr.push((stars[i].px + 1.0) - crpix1);  // 0-based → 1-based → オフセット
-         vArr.push((stars[i].py + 1.0) - crpix2);
+         uArr.push((stars[i].px + 1.0) - crpix1);
+         vArr.push((this.height - stars[i].py) - crpix2);
       }
 
       // 正規方程式の各項を計算
@@ -251,7 +253,7 @@ WCSFitter.prototype.solve = function () {
 
    for (var i = 0; i < nStars; i++) {
       var u = (stars[i].px + 1.0) - crpix1;
-      var v = (stars[i].py + 1.0) - crpix2;
+      var v = (this.height - stars[i].py) - crpix2;
 
       // CD 行列で予測した標準座標
       var predXi  = cd[0][0] * u + cd[0][1] * v;

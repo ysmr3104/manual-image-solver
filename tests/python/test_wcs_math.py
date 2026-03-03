@@ -24,7 +24,7 @@ def _make_star_pairs(known_crval, known_cd, img_w, img_h, test_pixels):
     star_pairs = []
     for i, tp in enumerate(test_pixels):
         u = (tp["px"] + 1.0) - crpix1
-        v = (tp["py"] + 1.0) - crpix2
+        v = (img_h - tp["py"]) - crpix2  # FITS Y規約: 下起点
         xi = known_cd[0][0] * u + known_cd[0][1] * v
         eta = known_cd[1][0] * u + known_cd[1][1] * v
         coord = tan_deproject(known_crval, (xi, eta))
