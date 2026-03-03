@@ -22,7 +22,7 @@ from gui.image_viewer import ImageViewer
 from gui.star_table import StarTable
 from gui.star_dialog import StarEditDialog
 
-VERSION = "0.0.1"
+VERSION = "1.0.0"
 
 
 class MainWindow(QMainWindow):

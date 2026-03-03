@@ -10,7 +10,7 @@
 // Copyright (c) 2024-2025 Split Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "0.0.1"
+#define VERSION "1.0.0"
 
 #include <pjsr/StdIcon.jsh>
 #include <pjsr/StdButton.jsh>
