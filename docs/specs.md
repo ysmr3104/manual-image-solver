@@ -36,7 +36,7 @@ RA = CRVAL1 + atan2(ξ*(π/180)*sin(c), ρ*cos(CRVAL2)*cos(c) - η*(π/180)*sin(
 
 ### 2.2 CD 行列の線形最小二乗フィッティング
 
-ピクセルオフセット u_i = x_i - CRPIX1, v_i = y_i - CRPIX2 に対し:
+ピクセルオフセット u_i = (px_i + 1) - CRPIX1, v_i = (height - py_i) - CRPIX2 に対し（座標変換は §2.5 参照）:
 
 ```
 ξ_i = CD1_1 * u_i + CD1_2 * v_i
@@ -83,9 +83,22 @@ CRPIX2 = imageHeight / 2.0 + 0.5
 
 ### 2.5 座標系の変換
 
-- PJSR の `Image.sample(x, y)` は 0-based
-- FITS の CRPIX は 1-based
-- フィット時に `pixel_0based + 1.0` で 1-based に変換
+PixInsight のピクセル座標と標準 FITS 座標系では Y 軸の向きが異なる:
+
+| 座標系 | X 原点 | Y 原点 | Y 方向 |
+|---|---|---|---|
+| PixInsight (0-based) | 左端 = 0 | **上端 = 0** | 下向きに増加 |
+| 標準 FITS (1-based) | 左端 = 1 | **下端 = 1** | 上向きに増加 |
+
+変換式（`WCSFitter` 内で使用）:
+```
+u = (px + 1) - CRPIX1        ... X: 0-based → 1-based のみ
+v = (height - py) - CRPIX2   ... Y: 上下反転 + 1-based 変換
+```
+
+- `px=0`（画像左端）→ `fits_x=1`
+- `py=0`（画像上端）→ `fits_y=height`（FITS では最上行）
+- `py=height-1`（画像下端）→ `fits_y=1`（FITS では最下行）
 
 ### 2.6 残差計算
 

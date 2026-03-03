@@ -128,11 +128,11 @@ node tests/javascript/test_wcs_math.js
 - **TAN（gnomonic）投影**: `tan_project()` / `tan_deproject()` で天球座標 ↔ 標準座標を変換
 - **CD行列フィット**: 2つの独立した2変数線形回帰をクレーメルの公式で直接解く
 - **CRVAL 決定**: 星の天球座標のベクトル平均を初期値とし、残差重心で反復更新（5回）
-- **座標系**: ピクセル座標は 0-based、FITS CRPIX は 1-based。フィット時に +1 補正
+- **座標系**: ピクセル座標は 0-based（PixInsight: y=0 が画像上端）、FITS は 1-based（y=1 が画像下端）。フィット時に X は `px + 1`、Y は `height - py` で変換
 
 ### 実装上の重要な注意点
 
-- **0-based vs 1-based**: Python/PJSR の ピクセルは 0-based。FITS の CRPIX は 1-based。`WCSFitter` 内で `stars[i]["px"] + 1.0` として補正。
+- **ピクセル→FITS 座標変換**: PixInsight のピクセル座標は 0-based で y=0 が画像上端。標準 FITS 座標系は 1-based で y=1 が画像下端。`WCSFitter` 内で `u = (px + 1) - CRPIX1`、`v = (height - py) - CRPIX2` として変換。X は +1 のみ、Y は上下反転が必要。
 - **RA のラップアラウンド**: RA の平均値計算はベクトル平均（cos/sin）を使用。
 - **PJSR JSON 互換**: 科学表記を固定小数点に変換（`_sanitize_floats_for_pjsr()`）。
 - **matplotlib toolbar.mode**: `""` のときのみ星選択モード。`"zoom rect"` / `"pan/zoom"` 中はクリック無視。

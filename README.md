@@ -13,8 +13,8 @@ PixInsight                           Python GUI（自動起動）
 ┌──────────────┐                    ┌──────────────────┐
 │ 1. 画像を開く  │                    │                  │
 │ 2. Script >   │                    │                  │
-│    Run Script │                    │                  │
-│    > Manual.. │ ── temp.fits ──→  │ 3. 画像表示       │
+│    Utilities >│                    │                  │
+│    Manual..   │ ── temp.fits ──→  │ 3. 画像表示       │
 │              │                    │ 4. 星クリック+入力 │
 │              │                    │ 5. Solve          │
 │ 7. WCS 自動適用│ ←── .wcs.json ── │ 6. Apply & Close  │
@@ -24,56 +24,43 @@ PixInsight                           Python GUI（自動起動）
 
 ## インストール
 
-### 前提条件
+セットアップの詳細は [docs/setup.md](docs/setup.md) を参照してください。
 
-- Python 3.12 以降
-- [PixInsight](https://pixinsight.com/) 1.8.9 以降（WCS 適用時のみ）
-
-### Python GUI セットアップ
+### クイックスタート
 
 ```bash
 cd manual-image-solver
 
-# 仮想環境作成
+# 仮想環境作成 + 依存パッケージインストール
 python3 -m venv .venv
 source .venv/bin/activate
-
-# 依存パッケージインストール
 pip install -r requirements.txt
 ```
 
+PixInsight へのスクリプト登録:
+1. **Script > Feature Scripts...** を開く
+2. **Add** → `manual-image-solver/javascript/` ディレクトリを選択
+3. **Done** で閉じる → **Script > Utilities > ManualImageSolver** がメニューに追加される
+
 ## 使い方
 
-### PixInsight 完結ワークフロー（推奨）
+### 1. スクリプトを起動する
 
-1. PixInsight で対象画像を開く
-2. **Script > Run Script File...** → `javascript/ManualImageSolver.js`
-3. 初回のみ: Python パスと manual-image-solver ディレクトリを設定（次回以降は自動読み込み）
-4. Python GUI が自動起動 → 画像が表示される
-5. 画像上の星をクリック → セントロイドで自動スナップ → 座標入力ダイアログ
-6. 天体名を入力して **Search**（CDS Sesame 検索）、または RA/DEC を直接入力
-7. 4 星以上登録したら **Solve** → WCS フィッティング
-8. **Apply & Close** → PixInsight に自動的に WCS が適用される
+PixInsight で対象画像を開き、**Script > Utilities > ManualImageSolver** を実行します。
 
-### Python GUI 単体利用
+初回のみ Python パスと manual-image-solver ディレクトリの設定ダイアログが表示されます（次回以降は自動読み込み）。
 
-```bash
-# GUI 起動（スタンドアロン）
-.venv/bin/python python/main.py
+Python GUI が自動起動し、画像が表示されます。
 
-# 画像ファイルを指定して起動
-.venv/bin/python python/main.py --input /path/to/image.fits
-```
+![Python GUI 起動直後](docs/images/01_gui_initial.jpg)
 
-スタンドアロンモードでは **Export JSON** / **Write FITS** ボタンが表示されます。
+### 2. 星を登録する
 
-#### 操作方法
+画像上の星をクリックすると、セントロイド計算で星の中心に自動スナップし、座標入力ダイアログが開きます。
 
-| 操作 | 動作 |
-|---|---|
-| 左クリック | 星を選択 → StarEditDialog |
-| matplotlib ツールバー ズーム | ドラッグでズーム |
-| matplotlib ツールバー パン | ドラッグでパン |
+**天体名**を入力して **Search** をクリックすると、CDS Sesame データベースから RA/DEC が自動入力されます。RA/DEC を直接入力することもできます。
+
+![星座標入力ダイアログ](docs/images/02_star_dialog.jpg)
 
 #### 座標入力フォーマット
 
@@ -84,9 +71,55 @@ pip install -r requirements.txt
 | DEC（DMS） | `+07 24 25.4` / `-08:12:05.9` |
 | DEC（度数） | `7.407` / `-8.202` |
 
+### 3. Solve を実行する
+
+4 星以上を登録したら **Solve** ボタンをクリックします。WCS フィッティングが実行され、各星の残差が表示されます。
+
+![13星を登録してフィッティング](docs/images/03_stars_registered.jpg)
+
+### 4. WCS を適用する
+
+**Apply & Close** をクリックすると、WCS が JSON ファイルとして出力され、Python GUI が終了します。
+
+![Solve の結果通知](docs/images/04_solve_notification.jpg)
+
+PixInsight 側で JSON が自動的に読み込まれ、WCS がアクティブ画像に適用されます。
+
+![WCS 適用完了ダイアログ](docs/images/05_wcs_applied.jpg)
+
+Process Console にはフィット結果の詳細（各星の残差、画像四隅の座標、FOV、回転角度など）が表示されます。
+
+![Process Console のログ](docs/images/06_process_console.jpg)
+
+### 5. 結果を確認する
+
+WCS 適用後、PixInsight の **AnnotateImage** で星座や天体のアノテーションを重ねて確認できます。
+
+![AnnotateImage による確認](docs/images/07_annotated_image.jpg)
+
+### セッションの復元
+
+前回の星ペア情報がある場合、起動時に復元するか選択できます。
+
+![セッション復元ダイアログ](docs/images/08_restore_dialog.jpg)
+
+### Python GUI 単体利用
+
+PixInsight なしでスタンドアロンでも利用できます。
+
+```bash
+# GUI 起動
+.venv/bin/python python/main.py
+
+# 画像ファイルを指定して起動
+.venv/bin/python python/main.py --input /path/to/image.fits
+```
+
+スタンドアロンモードでは **Export JSON** / **Write FITS** ボタンが表示されます。
+
 ### WCSApplier.js（手動 JSON 適用）
 
-スタンドアロンで JSON ファイルから WCS を適用する場合:
+JSON ファイルから WCS を手動適用する場合:
 1. PixInsight で対象画像を開く
 2. **Script > Run Script File...** → `javascript/WCSApplier.js`
 3. JSON ファイルを選択 → WCS が画像に適用される
@@ -115,42 +148,28 @@ manual-image-solver/
 │   ├── WCSApplier.js              # スタンドアロン JSON → WCS 適用
 │   └── wcs_math.js                # WCS 数学関数（JS版）
 ├── tests/
-│   ├── python/
-│   │   ├── test_wcs_math.py       # WCS 数学テスト（36テスト）
-│   │   ├── test_centroid.py       # セントロイドテスト
-│   │   ├── test_image_loader.py   # 画像読み込みテスト
-│   │   └── test_wcs_json.py       # JSON 入出力テスト
-│   └── javascript/
-│       ├── test_wcs_math.js       # Node.js 単体テスト（55テスト）
-│       └── ManualSolverTest.js    # PJSR 統合テスト
+│   ├── python/                    # pytest（36テスト）
+│   └── javascript/                # Node.js 単体テスト + PJSR 統合テスト
 ├── docs/
+│   ├── setup.md                   # セットアップガイド
 │   ├── specs.md                   # 技術仕様書
-│   └── tests.md                   # テスト手順書
+│   ├── tests.md                   # テスト手順書
+│   └── images/                    # スクリーンショット
 ├── requirements.txt
 └── .gitignore
 ```
 
 ## テスト
 
-### Python テスト
-
 ```bash
-# 全テスト実行
+# Python 全テスト実行
 PYTHONPATH="python" .venv/bin/pytest tests/python -v
 
-# WCS 数学テストのみ
-PYTHONPATH="python" .venv/bin/pytest tests/python/test_wcs_math.py -v
-```
-
-### Node.js テスト
-
-```bash
+# Node.js 単体テスト
 node tests/javascript/test_wcs_math.js
 ```
 
-### PJSR 統合テスト
-
-PixInsight コンソールで: **Script > Run Script File...** → `tests/javascript/ManualSolverTest.js`
+PJSR 統合テスト: PixInsight で **Script > Run Script File...** → `tests/javascript/ManualSolverTest.js`
 
 ## 技術詳細
 
@@ -158,7 +177,7 @@ PixInsight コンソールで: **Script > Run Script File...** → `tests/javasc
 - **フィッティング**: CD行列の線形最小二乗法（クレーメルの公式）
 - **CRVAL 決定**: 星の天球座標重心から反復更新（5回）
 - **セントロイド**: 輝度重心法（バックグラウンド中央値差し引き）
-- **座標系**: ピクセル（0-based）→ FITS CRPIX（1-based）変換
+- **座標系**: PixInsight ピクセル（0-based, y=0 が上端）→ 標準 FITS（1-based, y=1 が下端）変換
 - **オートストレッチ**: astropy ZScale + AsinhStretch
 
 詳細は [docs/specs.md](docs/specs.md) を参照。
