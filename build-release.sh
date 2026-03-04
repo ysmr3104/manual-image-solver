@@ -59,7 +59,7 @@ cat > "${REPO_DIR}/updates.xri" << XMLEOF
       <title>Manual Image Solver</title>
       <brief_description>Manual plate solver for PixInsight</brief_description>
    </description>
-   <platform os="all" arch="noarch">
+   <platform os="all" arch="noarch" version="1.8.9:9.9.9">
       <package fileName="${ZIP_NAME}"
                sha1="${SHA1}"
                type="script"
