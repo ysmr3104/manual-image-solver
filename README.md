@@ -1,200 +1,119 @@
-# Manual Image Solver
+[日本語](README.ja.md)
 
-手動プレートソルブツール。画像上の星をユーザーが手動で同定し、TAN（gnomonic）投影の WCS（World Coordinate System）を算出して画像に適用します。
+# Manual Image Solver v1.1.0
 
-## 概要
+A manual plate solving tool for PixInsight. Manually identify stars on an image to compute and apply a TAN (gnomonic) projection WCS (World Coordinate System).
 
-astrometry.net や PixInsight の ImageSolver による自動プレートソルブが失敗する画像に対し、手動で星を同定して WCS を取得するためのツールです。
+## Overview
 
-**PixInsight 完結ワークフロー**: PixInsight のスクリプトメニューから起動するだけで、Python GUI による星の手動選択から WCS 適用まで一気通貫で完了します。
+When automatic plate solving with astrometry.net or PixInsight's ImageSolver fails, this tool lets you manually identify stars to obtain a WCS solution.
 
-```mermaid
-sequenceDiagram
-    participant PI as PixInsight
-    participant JS as ManualImageSolver.js
-    participant PY as Python GUI
+**Runs entirely within PixInsight**: No external dependencies like Python required. All operations — image display, star selection, WCS fitting, and application — are performed within a native PJSR Dialog.
 
-    PI->>JS: Script > Utilities > ManualImageSolver
-    JS->>JS: アクティブ画像を一時 FITS に保存
-    JS->>PY: ExternalProcess で起動（temp.fits）
-    PY->>PY: 画像表示
-    PY->>PY: 星クリック + セントロイド + 座標入力
-    PY->>PY: Solve（WCS フィッティング）
-    PY->>JS: Apply & Close（.wcs.json 出力）
-    JS->>PI: WCS キーワードを画像に適用
-    PI->>PI: アストロメトリック表示を再生成
-```
+![Main dialog with registered stars](docs/images/03_stars_registered.jpg)
 
-## インストール
+## Features
 
-セットアップの詳細は [docs/setup.md](docs/setup.md) を参照してください。
+- **Intuitive controls**: Click to select stars, drag to pan (no mode switching needed)
+- **Stretch modes**: Switch between None / Linked / Unlinked with one click
+- **19-level zoom**: Mouse wheel (centered on cursor), Fit / 1:1 buttons, +/- buttons
+- **Session restore**: Star pair data is auto-saved and can be restored on next launch
+- **Export / Import**: Save and load star pair data as JSON files
+- **Sesame search**: Auto-resolve RA/DEC from object names via the CDS Sesame database
+- **Centroid calculation**: Auto-snap to star centers using intensity-weighted centroid
 
-### クイックスタート
+## Installation
 
-```bash
-cd manual-image-solver
+### From Repository (Recommended)
 
-# 仮想環境作成 + 依存パッケージインストール
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
+1. In PixInsight, go to **Resources > Updates > Manage Repositories**
+2. Click **Add** and enter the following URL:
+   ```
+   https://raw.githubusercontent.com/ysmr3104/manual-image-solver/main/repository/
+   ```
+3. Click **OK**, then run **Resources > Updates > Check for Updates**
+4. Restart PixInsight
 
-PixInsight へのスクリプト登録:
-1. **Script > Feature Scripts...** を開く
-2. **Add** → `manual-image-solver/javascript/` ディレクトリを選択
-3. **Done** で閉じる → **Script > Utilities > ManualImageSolver** がメニューに追加される
+### Manual Installation
 
-## 使い方
+1. Clone or download this repository
+2. In PixInsight, open **Script > Feature Scripts...**
+3. Click **Add** and select the `manual-image-solver/javascript/` directory
+4. Click **Done** — **Script > Utilities > ManualImageSolver** will appear in the menu
 
-### 1. スクリプトを起動する
+No Python or external packages required.
 
-PixInsight で対象画像を開き、**Script > Utilities > ManualImageSolver** を実行します。
+## Usage
 
-初回のみ Python パスと manual-image-solver ディレクトリの設定ダイアログが表示されます（次回以降は自動読み込み）。
+### 1. Launch the Script
 
-Python GUI が自動起動し、画像が表示されます。
+Open the target image in PixInsight and run **Script > Utilities > ManualImageSolver**.
 
-![Python GUI 起動直後](docs/images/01_gui_initial.jpg)
+The dialog opens with a stretched preview of the image.
 
-### 2. 星を登録する
+![Main dialog - initial state](docs/images/01_gui_initial.jpg)
 
-画像上の星をクリックすると、セントロイド計算で星の中心に自動スナップし、座標入力ダイアログが開きます。
+If session data from a previous run exists, a dialog will ask whether to restore it.
 
-**天体名**を入力して **Search** をクリックすると、CDS Sesame データベースから RA/DEC が自動入力されます。RA/DEC を直接入力することもできます。
+<img src="docs/images/08_restore_dialog.jpg" alt="Session restore dialog" width="480">
 
-<img src="docs/images/02_star_dialog.jpg" width="360" alt="星座標入力ダイアログ">
+### 2. Register Stars
 
-#### 座標入力フォーマット
+**Click** on a star in the image. The centroid algorithm auto-snaps to the star center, and a coordinate input dialog opens.
 
-| 項目 | フォーマット例 |
+<img src="docs/images/02_star_dialog.jpg" alt="Star coordinate input dialog" width="480">
+
+Enter an **object name** and click **Search** to auto-fill RA/DEC from the CDS Sesame database. You can also enter RA/DEC directly.
+
+#### Coordinate Input Formats
+
+| Field | Format Examples |
 |---|---|
-| RA（HMS） | `05 14 32.27` / `05:14:32.27` |
-| RA（度数） | `78.634` |
-| DEC（DMS） | `+07 24 25.4` / `-08:12:05.9` |
-| DEC（度数） | `7.407` / `-8.202` |
+| RA (HMS) | `05 14 32.27` / `05:14:32.27` |
+| RA (degrees) | `78.634` |
+| DEC (DMS) | `+07 24 25.4` / `-08:12:05.9` |
+| DEC (degrees) | `7.407` / `-8.202` |
 
-### 3. Solve を実行する
+### 3. Run Solve
 
-4 星以上を登録したら **Solve** ボタンをクリックします。WCS フィッティングが実行され、各星の残差が表示されます。
+Once 4 or more stars are registered, click the **Solve** button. WCS fitting is performed and residuals for each star are displayed.
 
-![13星を登録してフィッティング](docs/images/03_stars_registered.jpg)
+### 4. Apply WCS
 
-### 4. WCS を適用する
+Click **Apply to Image** to write the WCS directly to the active image.
 
-**Apply & Close** をクリックすると、WCS が JSON ファイルとして出力され、Python GUI が終了します。
+The Process Console displays fit details including per-star residuals, corner coordinates, FOV, and rotation angle.
 
-<img src="docs/images/04_solve_notification.jpg" width="280" alt="Solve の結果通知">
+![Process Console output](docs/images/06_process_console.jpg)
 
-PixInsight 側で JSON が自動的に読み込まれ、WCS がアクティブ画像に適用されます。
+### 5. Verify Results
 
-<img src="docs/images/05_wcs_applied.jpg" width="360" alt="WCS 適用完了ダイアログ">
+After WCS application, use PixInsight's **AnnotateImage** to overlay constellation lines and object annotations for verification.
 
-Process Console にはフィット結果の詳細（各星の残差、画像四隅の座標、FOV、回転角度など）が表示されます。
+![Verification with AnnotateImage](docs/images/07_annotated_image.jpg)
 
-![Process Console のログ](docs/images/06_process_console.jpg)
+### Tips
 
-### 5. 結果を確認する
+- **Star selection**: Click on the image (auto-snaps via centroid)
+- **Pan**: Left-button drag or middle-button drag
+- **Zoom**: Mouse wheel (centered on cursor position)
+- **Zoom buttons**: Fit (fit to window), 1:1 (actual size), + (zoom in), - (zoom out)
+- **Stretch toggle**: STF: None / Linked / Unlinked buttons in toolbar (active mode shown with ▶ marker)
+- **Edit stars**: Double-click a table row, or select and click **Edit...**
+- **Remove stars**: Select and click **Remove**
+- **Export / Import**: Save and load star pair data as JSON files
 
-WCS 適用後、PixInsight の **AnnotateImage** で星座や天体のアノテーションを重ねて確認できます。
+### WCSApplier.js (Manual JSON Application)
 
-![AnnotateImage による確認](docs/images/07_annotated_image.jpg)
+To manually apply WCS from a JSON file:
+1. Open the target image in PixInsight
+2. **Script > Run Script File...** → select `javascript/WCSApplier.js`
+3. Select the JSON file → WCS is applied to the image
 
-### セッションの復元
+## Technical Details
 
-前回の星ペア情報がある場合、起動時に復元するか選択できます。
+See [docs/specs.md](docs/specs.md) for the full technical specification.
 
-<img src="docs/images/08_restore_dialog.jpg" width="360" alt="セッション復元ダイアログ">
+## License
 
-### Python GUI 単体利用
-
-PixInsight なしでスタンドアロンでも利用できます。
-
-```bash
-# GUI 起動
-.venv/bin/python python/main.py
-
-# 画像ファイルを指定して起動
-.venv/bin/python python/main.py --input /path/to/image.fits
-```
-
-スタンドアロンモードでは **Export JSON** / **Write FITS** ボタンが表示されます。
-
-### WCSApplier.js（手動 JSON 適用）
-
-JSON ファイルから WCS を手動適用する場合:
-1. PixInsight で対象画像を開く
-2. **Script > Run Script File...** → `javascript/WCSApplier.js`
-3. JSON ファイルを選択 → WCS が画像に適用される
-
-## プロジェクト構成
-
-```
-manual-image-solver/
-├── python/
-│   ├── main.py                    # CLI エントリーポイント（--input, --output 対応）
-│   ├── gui/
-│   │   ├── main_window.py         # PyQt6 QMainWindow
-│   │   ├── image_viewer.py        # matplotlib 画像ビューア
-│   │   ├── star_table.py          # 星テーブル（QTableWidget）
-│   │   └── star_dialog.py         # 星座標入力ダイアログ
-│   ├── core/
-│   │   ├── wcs_math.py            # TAN投影、WCSFitter
-│   │   ├── centroid.py            # セントロイド計算
-│   │   ├── image_loader.py        # FITS/XISF 読み込み
-│   │   ├── auto_stretch.py        # ZScale+AsinhStretch
-│   │   └── sesame_resolver.py     # CDS Sesame 天体名検索
-│   └── wcs_io/
-│       └── wcs_json.py            # PJSR互換 JSON 入出力
-├── javascript/
-│   ├── ManualImageSolver.js       # PJSR メイン（ExternalProcess で Python GUI 起動 → WCS 自動適用）
-│   ├── WCSApplier.js              # スタンドアロン JSON → WCS 適用
-│   └── wcs_math.js                # WCS 数学関数（JS版）
-├── tests/
-│   ├── python/                    # pytest（36テスト）
-│   └── javascript/                # Node.js 単体テスト + PJSR 統合テスト
-├── docs/
-│   ├── setup.md                   # セットアップガイド
-│   ├── specs.md                   # 技術仕様書
-│   ├── tests.md                   # テスト手順書
-│   └── images/                    # スクリーンショット
-├── requirements.txt
-└── .gitignore
-```
-
-## テスト
-
-```bash
-# Python 全テスト実行
-PYTHONPATH="python" .venv/bin/pytest tests/python -v
-
-# Node.js 単体テスト
-node tests/javascript/test_wcs_math.js
-```
-
-PJSR 統合テスト: PixInsight で **Script > Run Script File...** → `tests/javascript/ManualSolverTest.js`
-
-## 技術詳細
-
-- **投影方式**: TAN（gnomonic）投影
-- **フィッティング**: CD行列の線形最小二乗法（クレーメルの公式）
-- **CRVAL 決定**: 星の天球座標重心から反復更新（5回）
-- **セントロイド**: 輝度重心法（バックグラウンド中央値差し引き）
-- **座標系**: PixInsight ピクセル（0-based, y=0 が上端）→ 標準 FITS（1-based, y=1 が下端）変換
-- **オートストレッチ**: astropy ZScale + AsinhStretch
-
-詳細は [docs/specs.md](docs/specs.md) を参照。
-
-## 配布方法について
-
-本ツールは PixInsight の[アップデートリポジトリ](https://pixinsight.com/doc/docs/PIRepositoryReference/PIRepositoryReference.html)による配布を検討しましたが、以下の理由により GitHub での配布としています。
-
-- **PJSR の制約**: PixInsight の PJSR スクリプトは実行中コンソールがモーダルになるため、画像上で星をクリックして選択するインタラクティブな操作ができません。そのため Python GUI（PyQt6 + matplotlib）を外部プロセスとして起動する設計を採用しています。
-- **外部依存の問題**: PixInsight のアップデートリポジトリは PJSR スクリプトやネイティブモジュールの配布を想定しており、Python 環境を内包する仕組みがありません。
-- **ネイティブモジュール化の断念**: C++/PCL の `ProcessInterface` として実装すれば画像上でのインタラクティブ操作が可能になり、リポジトリ配布もできますが、macOS / Linux / Windows の 3 プラットフォーム分のビルド環境が必要となるため、現時点では対応が困難です。
-
-そのため、本リポジトリを clone し、セットアップ手順に従って Python 環境を構築していただく形での利用をお願いしています。
-
-## ライセンス
-
-Copyright (c) 2024-2025 Split Image Solver Project
+This project is licensed under the [MIT License](LICENSE).

@@ -1,19 +1,19 @@
 //============================================================================
-// wcs_math.js - WCS 数学関数ライブラリ
+// wcs_math.js - WCS Math Library
 //
-// TAN（gnomonic）投影、CD行列フィッティング、セントロイド計算を提供。
-// PJSR と Node.js の両方で動作する純粋 JavaScript。
+// Provides TAN (gnomonic) projection, CD matrix fitting, and centroid computation.
+// Pure JavaScript compatible with both PJSR and Node.js.
 //
 // Copyright (c) 2024-2025 Split Image Solver Project
 //============================================================================
 
-// PJSR 環境では Math は標準で利用可能。Node.js でも同様。
+// Math is available by default in both PJSR and Node.js environments.
 
 //----------------------------------------------------------------------------
-// TAN（gnomonic）投影: 天球座標 → 標準座標
-//   crval: [ra0, dec0] 度
-//   coord: [ra, dec] 度
-//   戻り値: [xi, eta] 度
+// TAN (gnomonic) projection: celestial coordinates -> standard coordinates
+//   crval: [ra0, dec0] in degrees
+//   coord: [ra, dec] in degrees
+//   Returns: [xi, eta] in degrees
 //----------------------------------------------------------------------------
 function tanProject(crval, coord) {
    var ra0  = crval[0] * Math.PI / 180.0;
@@ -30,7 +30,7 @@ function tanProject(crval, coord) {
 
    var D = sinDec0 * sinDec + cosDec0 * cosDec * cosDRA;
    if (D <= 0) {
-      return null; // 投影不可（反対半球）
+      return null; // Cannot project (opposite hemisphere)
    }
 
    var xi  = (cosDec * Math.sin(dRA)) / D * (180.0 / Math.PI);
@@ -40,10 +40,10 @@ function tanProject(crval, coord) {
 }
 
 //----------------------------------------------------------------------------
-// TAN 逆投影: 標準座標 → 天球座標
-//   crval: [ra0, dec0] 度
-//   standard: [xi, eta] 度
-//   戻り値: [ra, dec] 度
+// TAN inverse projection: standard coordinates -> celestial coordinates
+//   crval: [ra0, dec0] in degrees
+//   standard: [xi, eta] in degrees
+//   Returns: [ra, dec] in degrees
 //----------------------------------------------------------------------------
 function tanDeproject(crval, standard) {
    var ra0  = crval[0] * Math.PI / 180.0;
@@ -66,7 +66,7 @@ function tanDeproject(crval, standard) {
    var dec = Math.asin(cosC * sinDec0 + eta * sinC * cosDec0 / rho);
    var ra  = ra0 + Math.atan2(xi * sinC, rho * cosDec0 * cosC - eta * sinDec0 * sinC);
 
-   // RA を 0-360 に正規化
+   // Normalize RA to 0-360
    var raDeg = ra * 180.0 / Math.PI;
    while (raDeg < 0) raDeg += 360.0;
    while (raDeg >= 360.0) raDeg -= 360.0;
@@ -75,9 +75,9 @@ function tanDeproject(crval, standard) {
 }
 
 //----------------------------------------------------------------------------
-// 角距離計算（Vincenty 公式）
-//   coord1, coord2: [ra, dec] 度
-//   戻り値: 角距離（度）
+// Angular separation (Vincenty formula)
+//   coord1, coord2: [ra, dec] in degrees
+//   Returns: angular separation in degrees
 //----------------------------------------------------------------------------
 function angularSeparation(coord1, coord2) {
    var ra1  = coord1[0] * Math.PI / 180.0;
@@ -99,16 +99,16 @@ function angularSeparation(coord1, coord2) {
 }
 
 //----------------------------------------------------------------------------
-// WCSFitter: 星ペアから TAN 投影 WCS をフィッティング
+// WCSFitter: Fit a TAN projection WCS from star pairs
 //
-//   starPairs: [{px, py, ra, dec, name}] の配列（4つ以上必要）
-//   imageWidth, imageHeight: 画像サイズ（ピクセル）
+//   starPairs: array of [{px, py, ra, dec, name}] (requires 4 or more)
+//   imageWidth, imageHeight: image dimensions in pixels
 //----------------------------------------------------------------------------
 function WCSFitter(starPairs, imageWidth, imageHeight) {
    this.stars = starPairs;
    this.width = imageWidth;
    this.height = imageHeight;
-   // CRPIX は画像中心（FITS 1-based）
+   // CRPIX is the image center (FITS 1-based)
    this.crpix1 = imageWidth / 2.0 + 0.5;
    this.crpix2 = imageHeight / 2.0 + 0.5;
 }
@@ -120,22 +120,22 @@ WCSFitter.prototype.solve = function () {
    if (nStars < 4) {
       return {
          success: false,
-         message: "最低4つの星ペアが必要です（現在: " + nStars + "）"
+         message: "At least 4 star pairs required (current: " + nStars + ")"
       };
    }
 
-   // RA/DEC の範囲チェック
+   // RA/DEC range check
    for (var i = 0; i < nStars; i++) {
       if (stars[i].ra < 0 || stars[i].ra >= 360) {
          return {
             success: false,
-            message: "星 " + (i + 1) + " の RA が範囲外です: " + stars[i].ra
+            message: "Star " + (i + 1) + " RA is out of range: " + stars[i].ra
          };
       }
       if (stars[i].dec < -90 || stars[i].dec > 90) {
          return {
             success: false,
-            message: "星 " + (i + 1) + " の DEC が範囲外です: " + stars[i].dec
+            message: "Star " + (i + 1) + " DEC is out of range: " + stars[i].dec
          };
       }
    }
@@ -143,11 +143,11 @@ WCSFitter.prototype.solve = function () {
    var crpix1 = this.crpix1;
    var crpix2 = this.crpix2;
 
-   // --- 1. CRVAL 初期値 = 星の天球座標重心 ---
+   // --- 1. CRVAL initial value = centroid of star celestial coordinates ---
    var crval1 = 0;
    var crval2 = 0;
 
-   // RA はラップアラウンドを考慮して平均（ベクトル平均）
+   // Average RA using vector mean to handle wraparound
    var sumCosRA = 0, sumSinRA = 0;
    for (var i = 0; i < nStars; i++) {
       var raRad = stars[i].ra * Math.PI / 180.0;
@@ -159,14 +159,14 @@ WCSFitter.prototype.solve = function () {
    if (crval1 < 0) crval1 += 360.0;
    crval2 /= nStars;
 
-   // --- 2-4. 反復: TAN投影 → CD行列フィット → CRVAL更新 ---
+   // --- 2-4. Iterate: TAN projection -> CD matrix fit -> CRVAL update ---
    var cd = [[0, 0], [0, 0]];
    var maxIter = 5;
 
    for (var iter = 0; iter < maxIter; iter++) {
       var crval = [crval1, crval2];
 
-      // TAN投影で標準座標計算
+      // Compute standard coordinates via TAN projection
       var projOk = true;
       var xiArr = [];
       var etaArr = [];
@@ -183,12 +183,12 @@ WCSFitter.prototype.solve = function () {
       if (!projOk) {
          return {
             success: false,
-            message: "TAN投影に失敗しました（星が反対半球にある可能性）"
+            message: "TAN projection failed (stars may be in the opposite hemisphere)"
          };
       }
 
-      // ピクセルオフセット u, v（CRPIX 基準）
-      // 標準 FITS 座標系: y=1 が画像下端。fits_y = height - py。
+      // Pixel offset u, v (relative to CRPIX)
+      // Standard FITS coordinate system: y=1 is at the image bottom. fits_y = height - py.
       var uArr = [];
       var vArr = [];
       for (var i = 0; i < nStars; i++) {
@@ -196,7 +196,7 @@ WCSFitter.prototype.solve = function () {
          vArr.push((this.height - stars[i].py) - crpix2);
       }
 
-      // 正規方程式の各項を計算
+      // Compute terms of the normal equations
       var sumUU = 0, sumUV = 0, sumVV = 0;
       var sumUXi = 0, sumVXi = 0;
       var sumUEta = 0, sumVEta = 0;
@@ -210,12 +210,12 @@ WCSFitter.prototype.solve = function () {
          sumVEta += vArr[i] * etaArr[i];
       }
 
-      // クレーメルの公式で CD 行列を解く
+      // Solve CD matrix using Cramer's rule
       var det = sumUU * sumVV - sumUV * sumUV;
       if (Math.abs(det) < 1e-30) {
          return {
             success: false,
-            message: "正規方程式の行列式がゼロです（星が一直線上にある可能性）"
+            message: "Normal equation determinant is zero (stars may be collinear)"
          };
       }
 
@@ -224,11 +224,11 @@ WCSFitter.prototype.solve = function () {
       cd[1][0] = (sumUEta * sumVV - sumVEta * sumUV) / det;  // CD2_1
       cd[1][1] = (sumUU * sumVEta - sumUV * sumUEta) / det;  // CD2_2
 
-      // CRVAL 更新: CRPIX(画像中心) → 天球座標を逆変換
-      // CRPIX でのオフセットは (0, 0) なので標準座標も (0, 0)
-      // → CRVAL は変わらない。ただし CRPIX がピクセル座標の中心からずれている場合は更新。
-      // ここでは CRPIX を固定して CRVAL を微調整する方式:
-      // 全星の残差の重心で CRVAL を補正
+      // Update CRVAL: inverse transform CRPIX (image center) -> celestial coords
+      // Since the offset at CRPIX is (0, 0), standard coords are also (0, 0)
+      // -> CRVAL doesn't change. But if CRPIX is offset from the pixel center, update it.
+      // Here we use a fixed CRPIX with fine-tuned CRVAL:
+      // Correct CRVAL using the centroid of all star residuals
       var sumDXi = 0, sumDEta = 0;
       for (var i = 0; i < nStars; i++) {
          var predXi  = cd[0][0] * uArr[i] + cd[0][1] * vArr[i];
@@ -239,13 +239,13 @@ WCSFitter.prototype.solve = function () {
       var meanDXi  = sumDXi / nStars;
       var meanDEta = sumDEta / nStars;
 
-      // 残差重心を天球座標に逆変換して CRVAL を更新
+      // Inverse transform residual centroid to celestial coords and update CRVAL
       var newCrval = tanDeproject([crval1, crval2], [meanDXi, meanDEta]);
       crval1 = newCrval[0];
       crval2 = newCrval[1];
    }
 
-   // --- 5. 残差計算 ---
+   // --- 5. Compute residuals ---
    var crval = [crval1, crval2];
    var residuals = [];
    var totalResidSq = 0;
@@ -254,14 +254,14 @@ WCSFitter.prototype.solve = function () {
       var u = (stars[i].px + 1.0) - crpix1;
       var v = (this.height - stars[i].py) - crpix2;
 
-      // CD 行列で予測した標準座標
+      // Standard coordinates predicted by the CD matrix
       var predXi  = cd[0][0] * u + cd[0][1] * v;
       var predEta = cd[1][0] * u + cd[1][1] * v;
 
-      // 予測標準座標 → 天球座標に逆変換
+      // Inverse transform predicted standard coords -> celestial coords
       var predCoord = tanDeproject(crval, [predXi, predEta]);
 
-      // 入力座標との角距離
+      // Angular distance from input coordinates
       var resid = angularSeparation([stars[i].ra, stars[i].dec], predCoord);
       var residArcsec = resid * 3600.0;
       residuals.push({
@@ -273,7 +273,7 @@ WCSFitter.prototype.solve = function () {
 
    var rmsArcsec = Math.sqrt(totalResidSq / nStars);
 
-   // ピクセルスケール計算（CD行列の特異値から）
+   // Pixel scale computation (from CD matrix singular values)
    var pixelScaleArcsec = Math.sqrt(Math.abs(cd[0][0] * cd[1][1] - cd[0][1] * cd[1][0])) * 3600.0;
 
    return {
@@ -286,21 +286,21 @@ WCSFitter.prototype.solve = function () {
       pixelScale_arcsec: pixelScaleArcsec,
       rms_arcsec: rmsArcsec,
       residuals: residuals,
-      message: "WCS フィット成功 (RMS: " + rmsArcsec.toFixed(2) + " arcsec, "
-         + "ピクセルスケール: " + pixelScaleArcsec.toFixed(3) + " arcsec/px)"
+      message: "WCS fit succeeded (RMS: " + rmsArcsec.toFixed(2) + " arcsec, "
+         + "pixel scale: " + pixelScaleArcsec.toFixed(3) + " arcsec/px)"
    };
 };
 
 //----------------------------------------------------------------------------
-// セントロイド計算（輝度重心法）
+// Centroid computation (intensity-weighted center of gravity)
 //
-// PJSR 環境では Image.sample(x, y, channel) を使用。
-// この関数は PJSR 専用。
+// Uses Image.sample(x, y, channel) in the PJSR environment.
+// This function is PJSR-only.
 //
-//   image: PixInsight Image オブジェクト
-//   cx, cy: クリック位置（0-based ピクセル座標）
-//   radius: 検索半径（ピクセル、デフォルト 10）
-//   戻り値: {x, y} サブピクセル精度の星中心、または失敗時 null
+//   image: PixInsight Image object
+//   cx, cy: click position (0-based pixel coordinates)
+//   radius: search radius in pixels (default 10)
+//   Returns: {x, y} sub-pixel star center, or null on failure
 //----------------------------------------------------------------------------
 function computeCentroid(image, cx, cy, radius) {
    if (typeof radius === "undefined") radius = 10;
@@ -310,10 +310,10 @@ function computeCentroid(image, cx, cy, radius) {
    var x1 = Math.min(image.width - 1, Math.round(cx) + radius);
    var y1 = Math.min(image.height - 1, Math.round(cy) + radius);
 
-   // チャンネル 0 を使用（モノクロまたは R チャンネル）
+   // Use channel 0 (monochrome or R channel)
    var ch = 0;
 
-   // 窓内のピクセル値を収集してバックグラウンド推定（中央値）
+   // Collect pixel values within the window for background estimation (median)
    var values = [];
    for (var y = y0; y <= y1; y++) {
       for (var x = x0; x <= x1; x++) {
@@ -323,11 +323,11 @@ function computeCentroid(image, cx, cy, radius) {
 
    if (values.length === 0) return null;
 
-   // 中央値をバックグラウンドとして使用
+   // Use median as background level
    values.sort(function (a, b) { return a - b; });
    var median = values[Math.floor(values.length / 2)];
 
-   // 輝度重心計算（バックグラウンド差し引き）
+   // Intensity-weighted centroid (background subtracted)
    var sumW = 0, sumWX = 0, sumWY = 0;
    for (var y = y0; y <= y1; y++) {
       for (var x = x0; x <= x1; x++) {
@@ -348,7 +348,7 @@ function computeCentroid(image, cx, cy, radius) {
    };
 }
 
-// Node.js 環境での export（PJSR では無視される）
+// Export for Node.js environment (ignored in PJSR)
 if (typeof module !== "undefined") {
    module.exports = {
       tanProject: tanProject,

@@ -1,57 +1,22 @@
 #feature-id    WCSApplier : Utilities > WCSApplier
-#feature-info  Apply WCS from JSON file exported by ManualImageSolver Python GUI.
+#feature-info  Apply WCS from a JSON file to the active image.
 
 //----------------------------------------------------------------------------
 // WCSApplier.js - PixInsight JavaScript Runtime (PJSR) Script
 //
-// ManualImageSolver Python GUI が出力した WCS JSON ファイルを読み込み、
-// アクティブ画像に WCS キーワードを適用する。
+// Read a WCS JSON file and apply WCS keywords to the active image.
 //
-// Copyright (c) 2024-2025 Split Image Solver Project
+// Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.0.0"
+#define VERSION "1.1.0"
 
 #include <pjsr/StdIcon.jsh>
 #include <pjsr/StdButton.jsh>
 
+#include "wcs_keywords.js"
+
 #define TITLE "WCS Applier"
-
-// WCS関連のFITSキーワードかどうかを判定
-function isWCSKeyword(name) {
-   var wcsNames = [
-      "CRVAL1", "CRVAL2", "CRPIX1", "CRPIX2",
-      "CD1_1", "CD1_2", "CD2_1", "CD2_2",
-      "CDELT1", "CDELT2", "CROTA1", "CROTA2",
-      "CTYPE1", "CTYPE2", "CUNIT1", "CUNIT2",
-      "RADESYS", "EQUINOX",
-      "A_ORDER", "B_ORDER", "AP_ORDER", "BP_ORDER",
-      "PLTSOLVD"
-   ];
-   for (var i = 0; i < wcsNames.length; i++) {
-      if (name === wcsNames[i]) return true;
-   }
-   if (/^[AB]P?_\d+_\d+$/.test(name)) return true;
-   return false;
-}
-
-// FITSKeywordの型を値から判定して適切なFITSKeywordオブジェクトを生成
-function makeFITSKeyword(name, value) {
-   var strVal = value.toString();
-   if (strVal === "T" || strVal === "true") {
-      return new FITSKeyword(name, "T", "");
-   }
-   if (strVal === "F" || strVal === "false") {
-      return new FITSKeyword(name, "F", "");
-   }
-   var stringKeys = ["CTYPE1", "CTYPE2", "CUNIT1", "CUNIT2", "RADESYS", "PLTSOLVD"];
-   for (var i = 0; i < stringKeys.length; i++) {
-      if (name === stringKeys[i]) {
-         return new FITSKeyword(name, "'" + strVal + "'", "");
-      }
-   }
-   return new FITSKeyword(name, strVal, "");
-}
 
 // WCS キーワードを画像に適用
 function applyWCS(window, wcsData) {
@@ -142,11 +107,23 @@ function main() {
    }
 
    // WCSデータ検証
-   if (!wcsData.wcs || wcsData.wcs.crval1 === undefined) {
+   if (!wcsData.wcs) {
       var mb = new MessageBox("WCS データが見つかりません。",
          TITLE, StdIcon_Error, StdButton_Ok);
       mb.execute();
       return;
+   }
+   var requiredFields = ["crval1", "crval2", "crpix1", "crpix2",
+      "cd1_1", "cd1_2", "cd2_1", "cd2_2"];
+   for (var fi = 0; fi < requiredFields.length; fi++) {
+      var key = requiredFields[fi];
+      var val = wcsData.wcs[key];
+      if (typeof val !== "number" || !isFinite(val)) {
+         var mb = new MessageBox("WCS データが不正です: " + key + " = " + val,
+            TITLE, StdIcon_Error, StdButton_Ok);
+         mb.execute();
+         return;
+      }
    }
 
    // 画像サイズ照合（警告のみ）

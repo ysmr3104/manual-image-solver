@@ -1,84 +1,41 @@
 #feature-id    ManualImageSolver : Utilities > ManualImageSolver
-#feature-info  Manual plate solver: launch Python GUI to identify stars \
+#feature-info  Manual plate solver: interactively identify stars in a PJSR dialog \
    and compute a TAN-projection WCS solution, then apply it to the active image.
 
 //----------------------------------------------------------------------------
 // ManualImageSolver.js - PixInsight JavaScript Runtime (PJSR) Script
 //
-// Manual Image Solver: Python GUI を起動して手動で星を同定し、
-// TAN投影 WCS を算出してアクティブ画像に適用する。
+// Manual Image Solver: Manually identify stars in a native PJSR Dialog,
+// compute a TAN-projection WCS, and apply it to the active image.
 //
-// Copyright (c) 2024-2025 Split Image Solver Project
+// Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.0.0"
+#define VERSION "1.1.0"
 
 #include <pjsr/DataType.jsh>
 #include <pjsr/StdIcon.jsh>
 #include <pjsr/StdButton.jsh>
+#include <pjsr/StdCursor.jsh>
 #include <pjsr/TextAlign.jsh>
 #include <pjsr/Sizer.jsh>
+#include <pjsr/UndoFlag.jsh>
+#include <pjsr/NumericControl.jsh>
+#include <pjsr/Color.jsh>
 
 #include "wcs_math.js"
+#include "wcs_keywords.js"
 
 #define TITLE "Manual Image Solver"
 
-//============================================================================
-// ユーティリティ関数
-//============================================================================
-
-// パス内のスペースをシェル用にエスケープ
-function quotePath(path) {
-   return "'" + path.replace(/'/g, "'\\''") + "'";
-}
-
-// WCS関連のFITSキーワードかどうかを判定
-function isWCSKeyword(name) {
-   var wcsNames = [
-      "CRVAL1", "CRVAL2", "CRPIX1", "CRPIX2",
-      "CD1_1", "CD1_2", "CD2_1", "CD2_2",
-      "CDELT1", "CDELT2", "CROTA1", "CROTA2",
-      "CTYPE1", "CTYPE2", "CUNIT1", "CUNIT2",
-      "RADESYS", "EQUINOX",
-      "A_ORDER", "B_ORDER", "AP_ORDER", "BP_ORDER",
-      "PLTSOLVD",
-      "OBJCTRA", "OBJCTDEC"
-   ];
-   for (var i = 0; i < wcsNames.length; i++) {
-      if (name === wcsNames[i]) return true;
-   }
-   // SIP係数: A_i_j, B_i_j, AP_i_j, BP_i_j
-   if (/^[AB]P?_\d+_\d+$/.test(name)) return true;
-   return false;
-}
-
-// FITSKeywordの型を値から判定して適切なFITSKeywordオブジェクトを生成
-function makeFITSKeyword(name, value) {
-   var strVal = value.toString();
-   // 論理値
-   if (strVal === "T" || strVal === "true") {
-      return new FITSKeyword(name, "T", "");
-   }
-   if (strVal === "F" || strVal === "false") {
-      return new FITSKeyword(name, "F", "");
-   }
-   // 文字列型
-   var stringKeys = ["CTYPE1", "CTYPE2", "CUNIT1", "CUNIT2", "RADESYS", "PLTSOLVD",
-      "OBJCTRA", "OBJCTDEC"];
-   for (var i = 0; i < stringKeys.length; i++) {
-      if (name === stringKeys[i]) {
-         return new FITSKeyword(name, "'" + strVal + "'", "");
-      }
-   }
-   // 数値
-   return new FITSKeyword(name, strVal, "");
-}
+// Maximum bitmap edge size (memory optimization)
+#define MAX_BITMAP_EDGE 2048
 
 //============================================================================
-// 座標フォーマット・表示関数
+// Coordinate formatting and display functions
 //============================================================================
 
-// RA (度) → "HH MM SS.ss" 形式に変換
+// Convert RA (degrees) to "HH MM SS.ss" format
 function raToHMS(raDeg) {
    var ra = raDeg;
    while (ra < 0) ra += 360.0;
@@ -94,7 +51,7 @@ function raToHMS(raDeg) {
    return hStr + " " + mStr + " " + sStr;
 }
 
-// DEC (度) → "+DD MM SS.s" 形式に変換
+// Convert DEC (degrees) to "+DD MM SS.s" format
 function decToDMS(decDeg) {
    var sign = decDeg >= 0 ? "+" : "-";
    var dec = Math.abs(decDeg);
@@ -109,8 +66,7 @@ function decToDMS(decDeg) {
    return sign + dStr + " " + mStr + " " + sStr;
 }
 
-// ピクセル座標 → 天球座標変換（WCS JSON の wcs オブジェクト使用）
-// 標準 FITS 座標系: y=1 が画像下端。fits_y = imageHeight - py。
+// Convert pixel coordinates to celestial coordinates (using WCS parameters)
 function pixelToRaDec(wcs, px, py, imageHeight) {
    var u = (px + 1.0) - wcs.crpix1;
    var v = (imageHeight - py) - wcs.crpix2;
@@ -119,9 +75,8 @@ function pixelToRaDec(wcs, px, py, imageHeight) {
    return tanDeproject([wcs.crval1, wcs.crval2], [xi, eta]);
 }
 
-// 画像四隅・中央の座標をコンソールに表示
-function displayImageCoordinates(wcsData, imageWidth, imageHeight) {
-   var wcs = wcsData.wcs;
+// Display coordinates of image corners and center to the console
+function displayImageCoordinates(wcs, imageWidth, imageHeight) {
    var center = pixelToRaDec(wcs, imageWidth / 2.0, imageHeight / 2.0, imageHeight);
    var tl = pixelToRaDec(wcs, 0, 0, imageHeight);
    var tr = pixelToRaDec(wcs, imageWidth - 1, 0, imageHeight);
@@ -136,234 +91,797 @@ function displayImageCoordinates(wcsData, imageWidth, imageHeight) {
    console.writeln("  Bottom-Left ... RA: " + raToHMS(bl[0]) + "  Dec: " + decToDMS(bl[1]));
    console.writeln("  Bottom-Right .. RA: " + raToHMS(br[0]) + "  Dec: " + decToDMS(br[1]));
 
-   // FOV 計算
    var widthFov = angularSeparation(tl, tr);
    var heightFov = angularSeparation(tl, bl);
    console.writeln("  Field of view . " + widthFov.toFixed(2) + " x " + heightFov.toFixed(2) + " deg");
-   if (wcsData.fit_quality && wcsData.fit_quality.pixel_scale_arcsec)
-      console.writeln("  Pixel scale ... " + wcsData.fit_quality.pixel_scale_arcsec.toFixed(2) + " arcsec/px");
 
-   // 回転角度計算（CD行列から）
    var rotationDeg = Math.atan2(-wcs.cd1_2, wcs.cd2_2) * 180.0 / Math.PI;
    console.writeln("  Rotation ...... " + rotationDeg.toFixed(2) + " deg");
 }
 
-// 星ペア情報をコンソールに表示
-function displayStarPairs(wcsData) {
-   if (!wcsData.star_pairs || wcsData.star_pairs.length === 0) return;
+// Display star pair information to the console
+function displayStarPairs(starPairs, residuals) {
+   if (!starPairs || starPairs.length === 0) return;
    console.writeln("");
    console.writeln("<b>Star pairs:</b>");
-   for (var i = 0; i < wcsData.star_pairs.length; i++) {
-      var s = wcsData.star_pairs[i];
+   for (var i = 0; i < starPairs.length; i++) {
+      var s = starPairs[i];
       var line = "  " + (i + 1) + ". " + (s.name || "Star " + (i + 1));
       line += "  px(" + s.px.toFixed(1) + ", " + s.py.toFixed(1) + ")";
       line += "  RA: " + raToHMS(s.ra) + "  Dec: " + decToDMS(s.dec);
-      if (s.residual_arcsec !== undefined)
-         line += "  residual: " + s.residual_arcsec.toFixed(2) + "\"";
+      if (residuals && residuals[i] && residuals[i].residual_arcsec !== undefined)
+         line += "  residual: " + residuals[i].residual_arcsec.toFixed(2) + "\"";
       console.writeln(line);
    }
 }
 
 //============================================================================
-// WCS 適用関数（JSON フォーマットから読み込み）
+// Coordinate parsing functions (ported from Python star_dialog.py)
 //============================================================================
 
-function applyWCSFromJSON(window, wcsData) {
-   var existingKw = window.keywords;
+// Parse RA input (HMS "HH MM SS.ss" / "HH:MM:SS.ss" or degrees)
+// On success: degrees (0-360), on failure: null
+function parseRAInput(text) {
+   if (typeof text !== "string") return null;
+   text = text.trim();
+   if (text.length === 0) return null;
+
+   var parts = text.split(/[\s:]+/);
+   if (parts.length >= 3) {
+      var h = parseFloat(parts[0]);
+      var m = parseFloat(parts[1]);
+      var s = parseFloat(parts[2]);
+      if (!isNaN(h) && !isNaN(m) && !isNaN(s)) {
+         return (h + m / 60.0 + s / 3600.0) * 15.0;
+      }
+   }
+
+   var val = parseFloat(text);
+   if (!isNaN(val)) return val;
+   return null;
+}
+
+// Parse DEC input (DMS "+/-DD MM SS.ss" / "+/-DD:MM:SS.ss" or degrees)
+// On success: degrees (-90 to +90), on failure: null
+function parseDECInput(text) {
+   if (typeof text !== "string") return null;
+   text = text.trim();
+   if (text.length === 0) return null;
+
+   var sign = 1;
+   if (text.charAt(0) === "-") {
+      sign = -1;
+      text = text.substring(1);
+   } else if (text.charAt(0) === "+") {
+      text = text.substring(1);
+   }
+
+   var parts = text.split(/[\s:]+/);
+   if (parts.length >= 3) {
+      var d = parseFloat(parts[0]);
+      var m = parseFloat(parts[1]);
+      var s = parseFloat(parts[2]);
+      if (!isNaN(d) && !isNaN(m) && !isNaN(s)) {
+         return sign * (d + m / 60.0 + s / 3600.0);
+      }
+   }
+
+   var val = parseFloat(text);
+   if (!isNaN(val)) return sign * val;
+   return null;
+}
+
+//============================================================================
+// WCS application function
+//============================================================================
+
+function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
+   var existingKw = targetWindow.keywords;
    var cleanedKw = [];
    for (var i = 0; i < existingKw.length; i++) {
       if (!isWCSKeyword(existingKw[i].name))
          cleanedKw.push(existingKw[i]);
    }
 
-   var wcs = wcsData.wcs;
-   cleanedKw.push(makeFITSKeyword("CTYPE1", wcs.ctype1 || "RA---TAN"));
-   cleanedKw.push(makeFITSKeyword("CTYPE2", wcs.ctype2 || "DEC--TAN"));
-   cleanedKw.push(makeFITSKeyword("CRVAL1", wcs.crval1));
-   cleanedKw.push(makeFITSKeyword("CRVAL2", wcs.crval2));
-   cleanedKw.push(makeFITSKeyword("CRPIX1", wcs.crpix1));
-   cleanedKw.push(makeFITSKeyword("CRPIX2", wcs.crpix2));
-   cleanedKw.push(makeFITSKeyword("CD1_1", wcs.cd1_1));
-   cleanedKw.push(makeFITSKeyword("CD1_2", wcs.cd1_2));
-   cleanedKw.push(makeFITSKeyword("CD2_1", wcs.cd2_1));
-   cleanedKw.push(makeFITSKeyword("CD2_2", wcs.cd2_2));
+   cleanedKw.push(makeFITSKeyword("CTYPE1", "RA---TAN"));
+   cleanedKw.push(makeFITSKeyword("CTYPE2", "DEC--TAN"));
+   cleanedKw.push(makeFITSKeyword("CRVAL1", wcsResult.crval1));
+   cleanedKw.push(makeFITSKeyword("CRVAL2", wcsResult.crval2));
+   cleanedKw.push(makeFITSKeyword("CRPIX1", wcsResult.crpix1));
+   cleanedKw.push(makeFITSKeyword("CRPIX2", wcsResult.crpix2));
+   cleanedKw.push(makeFITSKeyword("CD1_1", wcsResult.cd[0][0]));
+   cleanedKw.push(makeFITSKeyword("CD1_2", wcsResult.cd[0][1]));
+   cleanedKw.push(makeFITSKeyword("CD2_1", wcsResult.cd[1][0]));
+   cleanedKw.push(makeFITSKeyword("CD2_2", wcsResult.cd[1][1]));
    cleanedKw.push(makeFITSKeyword("CUNIT1", "deg"));
    cleanedKw.push(makeFITSKeyword("CUNIT2", "deg"));
    cleanedKw.push(makeFITSKeyword("RADESYS", "ICRS"));
    cleanedKw.push(makeFITSKeyword("EQUINOX", 2000.0));
    cleanedKw.push(makeFITSKeyword("PLTSOLVD", "T"));
 
-   // 画像中心の RA/DEC を OBJCTRA/OBJCTDEC として書き込み（ImageSolver 互換）
-   var imgCenter = pixelToRaDec(wcs,
-      wcsData.image.width / 2.0, wcsData.image.height / 2.0, wcsData.image.height);
+   // Write image center RA/DEC as OBJCTRA/OBJCTDEC
+   var wcsObj = {
+      crval1: wcsResult.crval1, crval2: wcsResult.crval2,
+      crpix1: wcsResult.crpix1, crpix2: wcsResult.crpix2,
+      cd1_1: wcsResult.cd[0][0], cd1_2: wcsResult.cd[0][1],
+      cd2_1: wcsResult.cd[1][0], cd2_2: wcsResult.cd[1][1]
+   };
+   var imgCenter = pixelToRaDec(wcsObj, imageWidth / 2.0, imageHeight / 2.0, imageHeight);
    cleanedKw.push(makeFITSKeyword("OBJCTRA", raToHMS(imgCenter[0])));
    cleanedKw.push(makeFITSKeyword("OBJCTDEC", decToDMS(imgCenter[1])));
 
-   window.keywords = cleanedKw;
-   window.regenerateAstrometricSolution();
+   targetWindow.keywords = cleanedKw;
+   targetWindow.regenerateAstrometricSolution();
 }
 
 //============================================================================
-// Settings 管理
+// Sesame object name search (ExternalProcess + curl)
 //============================================================================
 
-#define SETTINGS_KEY_PREFIX "ManualImageSolver/"
-#define KEY_PYTHON_PATH     SETTINGS_KEY_PREFIX + "pythonPath"
-#define KEY_SCRIPT_DIR      SETTINGS_KEY_PREFIX + "scriptDir"
-#define KEY_LAST_WCS_JSON   SETTINGS_KEY_PREFIX + "lastWcsJson"
+function searchObjectCoordinates(objectName) {
+   var encoded = objectName.replace(/ /g, "+");
+   var url = "http://cdsweb.u-strasbg.fr/cgi-bin/nph-sesame/-oI/A?" + encoded;
+   var tmpFile = File.systemTempDirectory + "/sesame_query.txt";
 
-function ManualSolverParameters() {
-   this.pythonPath = "";
-   this.scriptDir = "";
-   this.lastWcsJson = "";
+   var P = new ExternalProcess;
+   P.start("curl", ["-s", "-o", tmpFile, "-m", "10", url]);
+   if (!P.waitForFinished(15000)) {
+      P.kill();
+      return null;
+   }
+   if (P.exitCode !== 0) return null;
+   if (!File.exists(tmpFile)) return null;
 
-   this.load = function () {
-      var val;
-      try {
-         val = Settings.read(KEY_PYTHON_PATH, DataType_String);
-         if (val !== null) this.pythonPath = val;
-      } catch (e) { }
-      try {
-         val = Settings.read(KEY_SCRIPT_DIR, DataType_String);
-         if (val !== null) this.scriptDir = val;
-      } catch (e) { }
-      try {
-         val = Settings.read(KEY_LAST_WCS_JSON, DataType_String);
-         if (val !== null) this.lastWcsJson = val;
-      } catch (e) { }
-   };
+   var content = "";
+   try {
+      content = File.readTextFile(tmpFile);
+      File.remove(tmpFile);
+   } catch (e) {
+      return null;
+   }
 
-   this.save = function () {
-      Settings.write(KEY_PYTHON_PATH, DataType_String, this.pythonPath);
-      Settings.write(KEY_SCRIPT_DIR, DataType_String, this.scriptDir);
-      Settings.write(KEY_LAST_WCS_JSON, DataType_String, this.lastWcsJson);
-   };
-
-   this.isConfigured = function () {
-      return this.pythonPath.length > 0 && this.scriptDir.length > 0;
-   };
+   var lines = content.split("\n");
+   for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      if (line.indexOf("%J") === 0) {
+         var coords = line.substring(2).trim();
+         var eqIdx = coords.indexOf("=");
+         if (eqIdx > 0) coords = coords.substring(0, eqIdx).trim();
+         var parts = coords.split(/\s+/);
+         if (parts.length >= 2) {
+            var ra = parseFloat(parts[0]);
+            var dec = parseFloat(parts[1]);
+            if (!isNaN(ra) && !isNaN(dec)) return { ra: ra, dec: dec };
+         }
+      }
+   }
+   return null;
 }
 
 //============================================================================
-// SettingsDialog: Python パスとスクリプトディレクトリの設定
+// Auto stretch (MTF-based) + Bitmap generation
 //============================================================================
 
-function SettingsDialog(params) {
+// PixInsight STF method: median + MAD based MTF parameter computation
+// channel: channel number for statistics (default 0)
+function computeAutoSTF(image, channel) {
+   if (typeof channel === "undefined") channel = 0;
+   // Get statistics for the specified channel (using selectedChannel)
+   var savedChannel = image.selectedChannel;
+   image.selectedChannel = channel;
+   var median = image.median();
+
+   // Get MAD (may not be implemented in some PJSR versions)
+   var mad;
+   try {
+      mad = image.MAD();
+   } catch (e) {
+      // Approximate MAD with avgDev * 1.4826 if MAD is not implemented
+      mad = image.avgDev() * 1.4826;
+   }
+   image.selectedChannel = savedChannel;
+
+   // Fallback for uniform images where MAD is 0
+   if (mad === 0 || mad < 1e-15) {
+      return { shadowClip: 0.0, midtone: 0.5 };
+   }
+
+   // STF parameters (PixInsight defaults)
+   var targetMedian = 0.25;    // Target median
+   var shadowClipK = -2.8;     // Shadow clipping coefficient
+
+   var shadow = median + shadowClipK * mad;
+   if (shadow < 0) shadow = 0;
+
+   // Midtone function parameter: map median to targetMedian after stretch
+   var normalizedMedian = (median - shadow) / (1.0 - shadow);
+   if (normalizedMedian <= 0) normalizedMedian = 1e-6;
+   if (normalizedMedian >= 1) normalizedMedian = 1 - 1e-6;
+
+   // Compute MTF parameter m: MTF(m, normalizedMedian) = targetMedian
+   // m = (targetMedian - 1) * normalizedMedian / ((2*targetMedian - 1) * normalizedMedian - targetMedian)
+   var m = (targetMedian - 1.0) * normalizedMedian /
+           ((2.0 * targetMedian - 1.0) * normalizedMedian - targetMedian);
+   if (m < 0) m = 0;
+   if (m > 1) m = 1;
+
+   return { shadowClip: shadow, midtone: m };
+}
+
+// Midtones Transfer Function (MTF)
+function midtonesTransferFunction(m, x) {
+   if (x <= 0) return 0;
+   if (x >= 1) return 1;
+   if (m === 0) return 0;
+   if (m === 1) return 1;
+   if (m === 0.5) return x;
+   return ((m - 1.0) * x) / ((2.0 * m - 1.0) * x - m);
+}
+
+// Generate a stretched Bitmap from the image
+// maxEdge: maximum edge size (0 = no limit)
+// stretchMode: "none" / "linked" / "unlinked" (default "linked")
+function createStretchedBitmap(image, maxEdge, stretchMode) {
+   if (typeof maxEdge === "undefined") maxEdge = MAX_BITMAP_EDGE;
+   if (typeof stretchMode === "undefined") stretchMode = "linked";
+
+   var w = image.width;
+   var h = image.height;
+
+   // Compute scale factor
+   var scale = 1.0;
+   if (maxEdge > 0) {
+      var maxDim = Math.max(w, h);
+      if (maxDim > maxEdge) {
+         scale = maxEdge / maxDim;
+      }
+   }
+
+   var bmpW = Math.round(w * scale);
+   var bmpH = Math.round(h * scale);
+
+   var isColor = image.numberOfChannels >= 3;
+
+   // Compute STF parameters (per mode)
+   var stfR, stfG, stfB;
+   if (stretchMode === "linked") {
+      stfR = computeAutoSTF(image, 0);
+      stfG = stfR;
+      stfB = stfR;
+   } else if (stretchMode === "unlinked" && isColor) {
+      stfR = computeAutoSTF(image, 0);
+      stfG = computeAutoSTF(image, 1);
+      stfB = computeAutoSTF(image, 2);
+   } else if (stretchMode === "unlinked") {
+      // For monochrome, same as linked
+      stfR = computeAutoSTF(image, 0);
+      stfG = stfR;
+      stfB = stfR;
+   }
+   // When stretchMode === "none", STF is not needed
+
+   // Build bitmap directly
+   var bmp = new Bitmap(bmpW, bmpH);
+
+   for (var by = 0; by < bmpH; by++) {
+      for (var bx = 0; bx < bmpW; bx++) {
+         // Bitmap coordinates -> original image coordinates
+         var ix = Math.min(Math.floor(bx / scale), w - 1);
+         var iy = Math.min(Math.floor(by / scale), h - 1);
+
+         var r, g, b;
+         if (isColor) {
+            r = image.sample(ix, iy, 0);
+            g = image.sample(ix, iy, 1);
+            b = image.sample(ix, iy, 2);
+         } else {
+            r = g = b = image.sample(ix, iy, 0);
+         }
+
+         if (stretchMode === "none") {
+            // Linear mapping: directly convert to 0-255
+            r = Math.max(0, Math.min(1, r));
+            g = Math.max(0, Math.min(1, g));
+            b = Math.max(0, Math.min(1, b));
+         } else {
+            // Shadow clip + normalize + MTF (per-channel STF)
+            r = (r - stfR.shadowClip) / (1.0 - stfR.shadowClip);
+            g = (g - stfG.shadowClip) / (1.0 - stfG.shadowClip);
+            b = (b - stfB.shadowClip) / (1.0 - stfB.shadowClip);
+
+            r = midtonesTransferFunction(stfR.midtone, Math.max(0, Math.min(1, r)));
+            g = midtonesTransferFunction(stfG.midtone, Math.max(0, Math.min(1, g)));
+            b = midtonesTransferFunction(stfB.midtone, Math.max(0, Math.min(1, b)));
+         }
+
+         // Convert to 8-bit and set bitmap pixel
+         var ri = Math.round(r * 255);
+         var gi = Math.round(g * 255);
+         var bi = Math.round(b * 255);
+         // ARGB format: 0xAARRGGBB
+         bmp.setPixel(bx, by, 0xFF000000 | (ri << 16) | (gi << 8) | bi);
+      }
+   }
+
+   return { bitmap: bmp, scale: scale, width: bmpW, height: bmpH };
+}
+
+//============================================================================
+// ImagePreviewControl: Image display + zoom/pan/click
+//
+// Manages scroll state internally rather than relying on ScrollBox.
+// - this.scrollX / this.scrollY: content offset (manually managed)
+// - Scrollbars set explicitly via setHorizontalScrollRange / setVerticalScrollRange
+// - onPaint draws with offset applied
+//============================================================================
+
+function ImagePreviewControl(parent) {
+   this.__base__ = ScrollBox;
+   this.__base__(parent);
+
+   this.bitmap = null;        // Stretched bitmap
+   this.bitmapScale = 1.0;    // Original image -> bitmap scale factor
+   this.zoomLevel = 1.0;      // Display zoom level
+   this.starMarkers = [];     // [{imgX, imgY, index}]
+   this.selectedIndex = -1;   // Currently selected marker index
+   this.onImageClick = null;  // Callback: function(imgX, imgY)
+
+   // Manual scroll management
+   this.scrollX = 0;
+   this.scrollY = 0;
+   this.maxScrollX = 0;
+   this.maxScrollY = 0;
+
+   // Drag/click detection
+   this.isDragging = false;    // Mouse button is held down
+   this.hasMoved = false;      // Whether drag threshold has been exceeded
+   this.dragStartX = 0;
+   this.dragStartY = 0;
+   this.panScrollX = 0;
+   this.panScrollY = 0;
+
+   // Available zoom levels
+   this.zoomLevels = [
+      0.0625, 0.0833, 0.125, 0.1667, 0.25, 0.3333, 0.5, 0.6667, 0.75,
+      1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0
+   ];
+   this.zoomIndex = 9; // Initial = 1.0
+
+   this.autoScrolls = false; // Disabled in favor of manual management
+
+   var self = this;
+
+   this.viewport.cursor = new Cursor(StdCursor_Arrow);
+
+   // --- Scrollbar events ---
+   this.onHorizontalScrollPosUpdated = function (pos) {
+      self.scrollX = pos;
+      self.viewport.update();
+   };
+   this.onVerticalScrollPosUpdated = function (pos) {
+      self.scrollY = pos;
+      self.viewport.update();
+   };
+
+   // --- Paint ---
+   this.viewport.onPaint = function () {
+      var g = new Graphics(this);
+      g.fillRect(this.boundsRect, new Brush(0xFF202020));
+
+      if (self.bitmap) {
+         var dispW = Math.round(self.bitmap.width * self.zoomLevel);
+         var dispH = Math.round(self.bitmap.height * self.zoomLevel);
+
+         // Draw with scroll offset
+         g.drawScaledBitmap(
+            new Rect(-self.scrollX, -self.scrollY,
+                     dispW - self.scrollX, dispH - self.scrollY),
+            self.bitmap);
+
+         // Draw markers
+         for (var i = 0; i < self.starMarkers.length; i++) {
+            var mk = self.starMarkers[i];
+            // Image coords -> content coords -> display coords (minus scroll offset)
+            var vx = (mk.imgX * self.bitmapScale) * self.zoomLevel - self.scrollX;
+            var vy = (mk.imgY * self.bitmapScale) * self.zoomLevel - self.scrollY;
+
+            var isSelected = (i === self.selectedIndex);
+            var circleR = isSelected ? 14 : 12;
+            var crossR = isSelected ? 8 : 6;
+
+            // Green circle
+            g.pen = new Pen(isSelected ? 0xFFFFFF00 : 0xB300FF00, isSelected ? 2 : 1.5);
+            g.drawCircle(vx, vy, circleR);
+
+            // Red crosshair
+            g.pen = new Pen(0xCCFF0000, 1.5);
+            g.drawLine(vx - crossR, vy, vx + crossR, vy);
+            g.drawLine(vx, vy - crossR, vx, vy + crossR);
+
+            // Number label
+            g.pen = new Pen(0xE6FFFF00);
+            g.font = new Font("Helvetica", 9);
+            g.drawText(vx + circleR + 2, vy - circleR + 2, "" + (i + 1));
+         }
+      }
+
+      g.end();
+   };
+
+   // --- Mouse events ---
+   // Left click = star selection, left drag = pan, middle button drag = pan
+   #define DRAG_THRESHOLD 4
+
+   this.viewport.onMousePress = function (x, y, button, buttonState, modifiers) {
+      if (!self.bitmap) return;
+
+      if (button === 1 || button === 4) {
+         self.isDragging = true;
+         self.hasMoved = false;
+         self.dragStartX = x;
+         self.dragStartY = y;
+         self.panScrollX = self.scrollX;
+         self.panScrollY = self.scrollY;
+      }
+   };
+
+   this.viewport.onMouseMove = function (x, y, buttonState, modifiers) {
+      if (!self.isDragging) return;
+
+      var dx = x - self.dragStartX;
+      var dy = y - self.dragStartY;
+
+      // Start drag (pan) once threshold is exceeded
+      if (!self.hasMoved) {
+         if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
+            self.hasMoved = true;
+            self.viewport.cursor = new Cursor(StdCursor_ClosedHand);
+         }
+      }
+
+      if (self.hasMoved) {
+         self.setScroll(self.panScrollX - dx, self.panScrollY - dy);
+      }
+   };
+
+   this.viewport.onMouseRelease = function (x, y, button, buttonState, modifiers) {
+      if (!self.isDragging) return;
+
+      if (!self.hasMoved && button === 1) {
+         // Click (no movement) -> star selection
+         var imgX = (x + self.scrollX) / (self.bitmapScale * self.zoomLevel);
+         var imgY = (y + self.scrollY) / (self.bitmapScale * self.zoomLevel);
+
+         if (self.onImageClick) {
+            self.onImageClick(imgX, imgY);
+         }
+      }
+
+      self.isDragging = false;
+      self.hasMoved = false;
+      self.viewport.cursor = new Cursor(StdCursor_Arrow);
+   };
+
+   this.viewport.onMouseWheel = function (x, y, delta, buttonState, modifiers) {
+      if (!self.bitmap) return;
+
+      var oldZoom = self.zoomLevel;
+
+      if (delta > 0) {
+         var found = false;
+         for (var i = 0; i < self.zoomLevels.length; i++) {
+            if (self.zoomLevels[i] > oldZoom + 1e-6) {
+               self.zoomIndex = i;
+               found = true;
+               break;
+            }
+         }
+         if (!found) return;
+      } else {
+         var found = false;
+         for (var i = self.zoomLevels.length - 1; i >= 0; i--) {
+            if (self.zoomLevels[i] < oldZoom - 1e-6) {
+               self.zoomIndex = i;
+               found = true;
+               break;
+            }
+         }
+         if (!found) return;
+      }
+
+      // Zoom centered on mouse position
+      var newZoom = self.zoomLevels[self.zoomIndex];
+      var factor = newZoom / oldZoom;
+      var newScrollX = Math.round((self.scrollX + x) * factor - x);
+      var newScrollY = Math.round((self.scrollY + y) * factor - y);
+
+      self.zoomLevel = newZoom;
+      self.scrollX = newScrollX;
+      self.scrollY = newScrollY;
+      self.updateViewport();
+   };
+}
+
+ImagePreviewControl.prototype = new ScrollBox;
+
+// Clamp scroll position, sync scrollbars, and repaint
+ImagePreviewControl.prototype.setScroll = function (x, y) {
+   this.scrollX = Math.max(0, Math.min(this.maxScrollX, Math.round(x)));
+   this.scrollY = Math.max(0, Math.min(this.maxScrollY, Math.round(y)));
+   // Sync scrollbars
+   this.horizontalScrollPosition = this.scrollX;
+   this.verticalScrollPosition = this.scrollY;
+   this.viewport.update();
+};
+
+ImagePreviewControl.prototype.setBitmap = function (bitmapResult) {
+   this.bitmap = bitmapResult.bitmap;
+   this.bitmapScale = bitmapResult.scale;
+   this.scrollX = 0;
+   this.scrollY = 0;
+   this.updateViewport();
+};
+
+ImagePreviewControl.prototype.updateViewport = function () {
+   if (!this.bitmap) return;
+   var dispW = Math.round(this.bitmap.width * this.zoomLevel);
+   var dispH = Math.round(this.bitmap.height * this.zoomLevel);
+
+   // Visible area size
+   var viewW = this.viewport.width;
+   var viewH = this.viewport.height;
+   if (viewW <= 0) viewW = this.width;
+   if (viewH <= 0) viewH = this.height;
+
+   // Scroll range
+   this.maxScrollX = Math.max(0, dispW - viewW);
+   this.maxScrollY = Math.max(0, dispH - viewH);
+
+   // Clamp
+   this.scrollX = Math.max(0, Math.min(this.maxScrollX, this.scrollX));
+   this.scrollY = Math.max(0, Math.min(this.maxScrollY, this.scrollY));
+
+   // Scrollbar setup
+   this.setHorizontalScrollRange(0, this.maxScrollX);
+   this.setVerticalScrollRange(0, this.maxScrollY);
+   this.horizontalScrollPosition = this.scrollX;
+   this.verticalScrollPosition = this.scrollY;
+
+   this.viewport.update();
+};
+
+ImagePreviewControl.prototype.fitToWindow = function () {
+   if (!this.bitmap) return;
+   var viewW = this.viewport.width;
+   var viewH = this.viewport.height;
+   if (viewW <= 0) viewW = this.width;
+   if (viewH <= 0) viewH = this.height;
+   if (viewW <= 0 || viewH <= 0) return;
+
+   var zx = viewW / this.bitmap.width;
+   var zy = viewH / this.bitmap.height;
+   var fitZoom = Math.min(zx, zy);
+
+   this.zoomLevel = fitZoom;
+   this.zoomIndex = this.findNearestZoomIndex(fitZoom);
+   this.scrollX = 0;
+   this.scrollY = 0;
+   this.updateViewport();
+};
+
+// Return the zoomIndex nearest to the specified zoom level
+ImagePreviewControl.prototype.findNearestZoomIndex = function (zoom) {
+   var bestIdx = 0;
+   var bestDiff = Math.abs(this.zoomLevels[0] - zoom);
+   for (var i = 1; i < this.zoomLevels.length; i++) {
+      var diff = Math.abs(this.zoomLevels[i] - zoom);
+      if (diff < bestDiff) {
+         bestDiff = diff;
+         bestIdx = i;
+      }
+   }
+   return bestIdx;
+};
+
+// Zoom centered on the viewport center
+ImagePreviewControl.prototype.zoomAroundCenter = function (newZoom) {
+   var oldZoom = this.zoomLevel;
+   if (Math.abs(oldZoom - newZoom) < 1e-9) return;
+
+   var viewW = this.viewport.width;
+   var viewH = this.viewport.height;
+   if (viewW <= 0) viewW = this.width;
+   if (viewH <= 0) viewH = this.height;
+
+   // Content coordinates of the current display center
+   var centerX = this.scrollX + viewW / 2.0;
+   var centerY = this.scrollY + viewH / 2.0;
+
+   // Center coordinates at the new zoom level
+   var factor = newZoom / oldZoom;
+   this.scrollX = Math.round(centerX * factor - viewW / 2.0);
+   this.scrollY = Math.round(centerY * factor - viewH / 2.0);
+
+   this.zoomLevel = newZoom;
+   this.updateViewport(); // Clamp + scrollbar update + repaint
+};
+
+ImagePreviewControl.prototype.zoom11 = function () {
+   this.zoomIndex = this.findNearestZoomIndex(1.0);
+   this.zoomAroundCenter(this.zoomLevels[this.zoomIndex]);
+};
+
+ImagePreviewControl.prototype.zoomIn = function () {
+   var newIdx = -1;
+   for (var i = 0; i < this.zoomLevels.length; i++) {
+      if (this.zoomLevels[i] > this.zoomLevel + 1e-6) {
+         newIdx = i;
+         break;
+      }
+   }
+   if (newIdx >= 0) {
+      this.zoomIndex = newIdx;
+      this.zoomAroundCenter(this.zoomLevels[this.zoomIndex]);
+   }
+};
+
+ImagePreviewControl.prototype.zoomOut = function () {
+   var newIdx = -1;
+   for (var i = this.zoomLevels.length - 1; i >= 0; i--) {
+      if (this.zoomLevels[i] < this.zoomLevel - 1e-6) {
+         newIdx = i;
+         break;
+      }
+   }
+   if (newIdx >= 0) {
+      this.zoomIndex = newIdx;
+      this.zoomAroundCenter(this.zoomLevels[this.zoomIndex]);
+   }
+};
+
+//============================================================================
+// StarEditDialog: Star coordinate entry sub-dialog
+//============================================================================
+
+function StarEditDialog(parent, starIndex, starData) {
    this.__base__ = Dialog;
    this.__base__();
 
-   this.params = params;
+   var self = this;
+   this.starData = starData || { px: 0, py: 0, ra: null, dec: null, name: "" };
 
-   this.windowTitle = TITLE + " - 設定";
-   this.minWidth = 500;
+   this.windowTitle = "Reference Star #" + starIndex;
+   this.minWidth = 440;
 
-   // --- Python path ---
-   var pythonLabel = new Label(this);
-   pythonLabel.text = "Python executable:";
-   pythonLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+   // --- Pixel coordinate display ---
+   var pixelLabel = new Label(this);
+   pixelLabel.text = "Pixel:  X = " + this.starData.px.toFixed(2)
+                   + "    Y = " + this.starData.py.toFixed(2);
+   pixelLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
 
-   this.pythonEdit = new Edit(this);
-   this.pythonEdit.text = params.pythonPath;
-   this.pythonEdit.toolTip = "Python 実行ファイルのパス（例: /path/to/.venv/bin/python）";
-   this.pythonEdit.onTextUpdated = function () {
-      params.pythonPath = this.dialog.pythonEdit.text.trim();
-   };
+   // --- Object name + search ---
+   var nameLabel = new Label(this);
+   nameLabel.text = "Name:";
+   nameLabel.textAlignment = TextAlign_Right | TextAlign_VertCenter;
+   nameLabel.setFixedWidth(60);
 
-   var pythonBrowse = new ToolButton(this);
-   pythonBrowse.icon = this.scaledResource(":/icons/select-file.png");
-   pythonBrowse.setScaledFixedSize(22, 22);
-   pythonBrowse.toolTip = "Python 実行ファイルを選択";
-   pythonBrowse.onClick = function () {
-      var fd = new OpenFileDialog;
-      fd.caption = "Python 実行ファイルを選択";
-      if (fd.execute()) {
-         this.dialog.pythonEdit.text = fd.fileName;
-         params.pythonPath = fd.fileName;
+   this.nameEdit = new Edit(this);
+   this.nameEdit.text = this.starData.name || "";
+   this.nameEdit.toolTip = "Enter object name and Search (e.g., Sirius, Vega, M42)";
+
+   this.searchButton = new PushButton(this);
+   this.searchButton.text = "Search";
+   this.searchButton.toolTip = "Search coordinates by name via CDS Sesame";
+   this.searchButton.onClick = function () {
+      var name = self.nameEdit.text.trim();
+      if (name.length === 0) {
+         var mb = new MessageBox("Please enter an object name.",
+            TITLE, StdIcon_Warning, StdButton_Ok);
+         mb.execute();
+         return;
+      }
+      console.writeln("Sesame search: " + name + " ...");
+      console.flush();
+      var result = searchObjectCoordinates(name);
+      if (result) {
+         self.raEdit.text = raToHMS(result.ra);
+         self.decEdit.text = decToDMS(result.dec);
+         console.writeln("  → RA=" + result.ra.toFixed(4) + ", DEC=" + result.dec.toFixed(4));
+      } else {
+         var mb = new MessageBox(
+            "'" + name + "' not found.\nPlease enter RA/DEC manually.",
+            TITLE, StdIcon_Warning, StdButton_Ok);
+         mb.execute();
       }
    };
 
-   var pythonSizer = new HorizontalSizer;
-   pythonSizer.spacing = 4;
-   pythonSizer.add(pythonLabel);
-   pythonSizer.add(this.pythonEdit, 100);
-   pythonSizer.add(pythonBrowse);
+   var nameSizer = new HorizontalSizer;
+   nameSizer.spacing = 4;
+   nameSizer.add(nameLabel);
+   nameSizer.add(this.nameEdit, 100);
+   nameSizer.add(this.searchButton);
 
-   // --- Script directory ---
-   var scriptDirLabel = new Label(this);
-   scriptDirLabel.text = "Script directory:";
-   scriptDirLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+   // --- RA ---
+   var raLabel = new Label(this);
+   raLabel.text = "RA:";
+   raLabel.textAlignment = TextAlign_Right | TextAlign_VertCenter;
+   raLabel.setFixedWidth(60);
 
-   this.scriptDirEdit = new Edit(this);
-   this.scriptDirEdit.text = params.scriptDir;
-   this.scriptDirEdit.toolTip = "manual-image-solver ディレクトリのパス";
-   this.scriptDirEdit.onTextUpdated = function () {
-      params.scriptDir = this.dialog.scriptDirEdit.text.trim();
-   };
+   this.raEdit = new Edit(this);
+   this.raEdit.toolTip = "HH MM SS.ss / HH:MM:SS.ss / degrees";
+   if (this.starData.ra !== null && this.starData.ra !== undefined) {
+      this.raEdit.text = raToHMS(this.starData.ra);
+   }
 
-   var scriptDirBrowse = new ToolButton(this);
-   scriptDirBrowse.icon = this.scaledResource(":/icons/select-file.png");
-   scriptDirBrowse.setScaledFixedSize(22, 22);
-   scriptDirBrowse.toolTip = "manual-image-solver ディレクトリを選択";
-   scriptDirBrowse.onClick = function () {
-      var gdd = new GetDirectoryDialog;
-      gdd.caption = "manual-image-solver ディレクトリを選択";
-      if (gdd.execute()) {
-         this.dialog.scriptDirEdit.text = gdd.directory;
-         params.scriptDir = gdd.directory;
-      }
-   };
+   var raHintLabel = new Label(this);
+   raHintLabel.text = "(HH MM SS / deg)";
 
-   var scriptDirSizer = new HorizontalSizer;
-   scriptDirSizer.spacing = 4;
-   scriptDirSizer.add(scriptDirLabel);
-   scriptDirSizer.add(this.scriptDirEdit, 100);
-   scriptDirSizer.add(scriptDirBrowse);
+   var raSizer = new HorizontalSizer;
+   raSizer.spacing = 4;
+   raSizer.add(raLabel);
+   raSizer.add(this.raEdit, 100);
+   raSizer.add(raHintLabel);
 
-   // --- Buttons ---
+   // --- DEC ---
+   var decLabel = new Label(this);
+   decLabel.text = "DEC:";
+   decLabel.textAlignment = TextAlign_Right | TextAlign_VertCenter;
+   decLabel.setFixedWidth(60);
+
+   this.decEdit = new Edit(this);
+   this.decEdit.toolTip = "+DD MM SS.s / +DD:MM:SS.s / degrees";
+   if (this.starData.dec !== null && this.starData.dec !== undefined) {
+      this.decEdit.text = decToDMS(this.starData.dec);
+   }
+
+   var decHintLabel = new Label(this);
+   decHintLabel.text = "(+DD MM SS / deg)";
+
+   var decSizer = new HorizontalSizer;
+   decSizer.spacing = 4;
+   decSizer.add(decLabel);
+   decSizer.add(this.decEdit, 100);
+   decSizer.add(decHintLabel);
+
+   // --- OK / Cancel ---
    this.okButton = new PushButton(this);
    this.okButton.text = "OK";
    this.okButton.icon = this.scaledResource(":/icons/ok.png");
    this.okButton.onClick = function () {
-      if (params.pythonPath.length === 0) {
-         var mb = new MessageBox(
-            "Python 実行ファイルのパスを指定してください。",
-            TITLE, StdIcon_Error, StdButton_Ok);
+      // Validation
+      var ra = parseRAInput(self.raEdit.text);
+      var dec = parseDECInput(self.decEdit.text);
+
+      if (ra === null || dec === null) {
+         var mb = new MessageBox("Please enter valid RA and DEC values.",
+            TITLE, StdIcon_Warning, StdButton_Ok);
          mb.execute();
          return;
       }
-      if (!File.exists(params.pythonPath)) {
-         var mb = new MessageBox(
-            "指定された Python 実行ファイルが見つかりません:\n" + params.pythonPath,
-            TITLE, StdIcon_Error, StdButton_Ok);
+      if (ra < 0 || ra >= 360) {
+         var mb = new MessageBox("RA must be in the range 0 to 360 degrees.",
+            TITLE, StdIcon_Warning, StdButton_Ok);
          mb.execute();
          return;
       }
-      if (params.scriptDir.length === 0) {
-         var mb = new MessageBox(
-            "スクリプトディレクトリを指定してください。",
-            TITLE, StdIcon_Error, StdButton_Ok);
+      if (dec < -90 || dec > 90) {
+         var mb = new MessageBox("DEC must be in the range -90 to +90 degrees.",
+            TITLE, StdIcon_Warning, StdButton_Ok);
          mb.execute();
          return;
       }
-      // python/main.py の存在チェック
-      var mainPy = params.scriptDir + "/python/main.py";
-      if (!File.exists(mainPy)) {
-         var mb = new MessageBox(
-            "指定されたディレクトリに python/main.py が見つかりません:\n" +
-            mainPy + "\n\n" +
-            "manual-image-solver のルートディレクトリを指定してください。",
-            TITLE, StdIcon_Error, StdButton_Ok);
-         mb.execute();
-         return;
-      }
-      this.dialog.ok();
+
+      self.starData.ra = ra;
+      self.starData.dec = dec;
+      self.starData.name = self.nameEdit.text.trim();
+      self.ok();
    };
 
    this.cancelButton = new PushButton(this);
    this.cancelButton.text = "Cancel";
    this.cancelButton.icon = this.scaledResource(":/icons/cancel.png");
    this.cancelButton.onClick = function () {
-      this.dialog.cancel();
+      self.cancel();
    };
 
    var buttonSizer = new HorizontalSizer;
@@ -376,370 +894,734 @@ function SettingsDialog(params) {
    this.sizer = new VerticalSizer;
    this.sizer.margin = 8;
    this.sizer.spacing = 8;
-   this.sizer.add(pythonSizer);
-   this.sizer.add(scriptDirSizer);
+   this.sizer.add(pixelLabel);
+   this.sizer.addSpacing(4);
+   this.sizer.add(nameSizer);
+   this.sizer.add(raSizer);
+   this.sizer.add(decSizer);
    this.sizer.addSpacing(8);
    this.sizer.add(buttonSizer);
 
    this.adjustToContents();
 }
 
-SettingsDialog.prototype = new Dialog;
+StarEditDialog.prototype = new Dialog;
 
 //============================================================================
-// 一時 FITS 保存
+// ManualSolverDialog: Main dialog
 //============================================================================
 
-function saveImageToFits(window, filepath) {
-   var fitsFormat = new FileFormat("FITS", false/*toRead*/, true/*toWrite*/);
-   var writer = new FileFormatInstance(fitsFormat);
-   if (!writer.create(filepath))
-      throw new Error("一時 FITS ファイルの作成に失敗: " + filepath);
+function ManualSolverDialog(targetWindow) {
+   this.__base__ = Dialog;
+   this.__base__();
 
-   // FITSキーワードをコピー（メタデータ保持）
-   writer.keywords = window.keywords;
+   var self = this;
+   this.targetWindow = targetWindow;
+   this.image = targetWindow.mainView.image;
+   this.starPairs = [];      // [{px, py, ra, dec, name}]
+   this.wcsResult = null;    // Result of WCSFitter.solve()
+   this.stretchMode = "linked"; // "none" / "linked" / "unlinked"
 
-   var imgDesc = new ImageDescription;
-   imgDesc.bitsPerSample = 32;
-   imgDesc.ieeefpSampleFormat = true;
-   if (!writer.setOptions(imgDesc))
-      throw new Error("画像オプション設定に失敗");
-   if (!writer.writeImage(window.mainView.image))
-      throw new Error("画像データの書き込みに失敗");
-   writer.close();
+   this.windowTitle = TITLE + " v" + VERSION;
+   this.minWidth = 800;
+   this.minHeight = 600;
+
+   // --- Bitmap generation ---
+   console.writeln("Generating stretched bitmap...");
+   console.flush();
+   var bmpResult = createStretchedBitmap(this.image, MAX_BITMAP_EDGE, this.stretchMode);
+   console.writeln("  Bitmap: " + bmpResult.width + " x " + bmpResult.height
+      + " (scale=" + bmpResult.scale.toFixed(3) + ")");
+
+   // --- Toolbar ---
+   this.fitButton = new PushButton(this);
+   this.fitButton.text = "Fit";
+   this.fitButton.toolTip = "Fit to Window";
+   this.fitButton.onClick = function () {
+      self.preview.fitToWindow();
+   };
+
+   this.zoom11Button = new PushButton(this);
+   this.zoom11Button.text = "1:1";
+   this.zoom11Button.toolTip = "Zoom 1:1";
+   this.zoom11Button.onClick = function () {
+      self.preview.zoom11();
+   };
+
+   this.zoomInButton = new PushButton(this);
+   this.zoomInButton.text = "+";
+   this.zoomInButton.toolTip = "Zoom In";
+   this.zoomInButton.onClick = function () {
+      self.preview.zoomIn();
+   };
+
+   this.zoomOutButton = new PushButton(this);
+   this.zoomOutButton.text = "\u2212"; // Minus sign (U+2212)
+   this.zoomOutButton.toolTip = "Zoom Out";
+   this.zoomOutButton.onClick = function () {
+      self.preview.zoomOut();
+   };
+
+   var stretchLabel = new Label(this);
+   stretchLabel.text = "STF:";
+   stretchLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+
+   this.stretchNoneButton = new PushButton(this);
+   this.stretchNoneButton.text = "None";
+   this.stretchNoneButton.toolTip = "No stretch (linear)";
+   this.stretchNoneButton.onClick = function () {
+      if (self.stretchMode !== "none") {
+         self.stretchMode = "none";
+         self.updateStretchButtons();
+         self.rebuildBitmap();
+      }
+   };
+
+   this.stretchLinkedButton = new PushButton(this);
+   this.stretchLinkedButton.text = "\u25B6Linked";  // Default: active
+   this.stretchLinkedButton.toolTip = "Same stretch for all channels";
+   this.stretchLinkedButton.onClick = function () {
+      if (self.stretchMode !== "linked") {
+         self.stretchMode = "linked";
+         self.updateStretchButtons();
+         self.rebuildBitmap();
+      }
+   };
+
+   this.stretchUnlinkedButton = new PushButton(this);
+   this.stretchUnlinkedButton.text = "Unlinked";
+   this.stretchUnlinkedButton.toolTip = "Independent stretch per channel";
+   this.stretchUnlinkedButton.onClick = function () {
+      if (self.stretchMode !== "unlinked") {
+         self.stretchMode = "unlinked";
+         self.updateStretchButtons();
+         self.rebuildBitmap();
+      }
+   };
+
+   var toolbarSizer = new HorizontalSizer;
+   toolbarSizer.spacing = 4;
+   toolbarSizer.add(this.fitButton);
+   toolbarSizer.add(this.zoom11Button);
+   toolbarSizer.add(this.zoomInButton);
+   toolbarSizer.add(this.zoomOutButton);
+   toolbarSizer.addSpacing(12);
+   toolbarSizer.add(stretchLabel);
+   toolbarSizer.add(this.stretchNoneButton);
+   toolbarSizer.add(this.stretchLinkedButton);
+   toolbarSizer.add(this.stretchUnlinkedButton);
+   toolbarSizer.addStretch();
+
+   // --- ImagePreviewControl ---
+   this.preview = new ImagePreviewControl(this);
+   this.preview.setMinSize(400, 300);
+   this.preview.setBitmap(bmpResult);
+
+   this.preview.onImageClick = function (imgX, imgY) {
+      self.onImageClicked(imgX, imgY);
+   };
+
+   // --- Star table (TreeBox) ---
+   var starTableLabel = new Label(this);
+   starTableLabel.text = "Reference Stars (minimum 4):";
+
+   this.starTreeBox = new TreeBox(this);
+   this.starTreeBox.alternateRowColor = true;
+   this.starTreeBox.headerVisible = true;
+   this.starTreeBox.numberOfColumns = 6;
+   this.starTreeBox.setHeaderText(0, "#");
+   this.starTreeBox.setHeaderText(1, "X");
+   this.starTreeBox.setHeaderText(2, "Y");
+   this.starTreeBox.setHeaderText(3, "Name");
+   this.starTreeBox.setHeaderText(4, "RA / DEC");
+   this.starTreeBox.setHeaderText(5, "Residual");
+   this.starTreeBox.setHeaderAlignment(0, TextAlign_Left | TextAlign_VertCenter);
+   this.starTreeBox.setColumnWidth(0, 45);
+   this.starTreeBox.setColumnWidth(1, 70);
+   this.starTreeBox.setColumnWidth(2, 70);
+   this.starTreeBox.setColumnWidth(3, 120);
+   this.starTreeBox.setColumnWidth(4, 200);
+   this.starTreeBox.setColumnWidth(5, 80);
+   this.starTreeBox.setMinHeight(120);
+
+   // TreeBox selection change -> highlight marker
+   this.starTreeBox.onCurrentNodeUpdated = function (node) {
+      if (node) {
+         self.preview.selectedIndex = self.starTreeBox.childIndex(node);
+      } else {
+         self.preview.selectedIndex = -1;
+      }
+      self.preview.viewport.update();
+   };
+
+   // TreeBox double-click -> edit
+   this.starTreeBox.onNodeDoubleClicked = function (node, col) {
+      var idx = self.starTreeBox.childIndex(node);
+      if (idx >= 0 && idx < self.starPairs.length) {
+         self.editStar(idx);
+      }
+   };
+
+   // --- Star table buttons ---
+   this.editStarButton = new PushButton(this);
+   this.editStarButton.text = "Edit...";
+   this.editStarButton.toolTip = "Edit selected star";
+   this.editStarButton.onClick = function () {
+      var node = self.starTreeBox.currentNode;
+      if (!node) return;
+      var idx = self.starTreeBox.childIndex(node);
+      if (idx >= 0 && idx < self.starPairs.length) {
+         self.editStar(idx);
+      }
+   };
+
+   this.removeStarButton = new PushButton(this);
+   this.removeStarButton.text = "Remove";
+   this.removeStarButton.toolTip = "Remove selected star";
+   this.removeStarButton.onClick = function () {
+      var node = self.starTreeBox.currentNode;
+      if (!node) return;
+      var idx = self.starTreeBox.childIndex(node);
+      if (idx >= 0 && idx < self.starPairs.length) {
+         self.starPairs.splice(idx, 1);
+         self.wcsResult = null;
+         self.refreshAll();
+      }
+   };
+
+   this.clearStarsButton = new PushButton(this);
+   this.clearStarsButton.text = "Clear All";
+   this.clearStarsButton.toolTip = "Remove all stars";
+   this.clearStarsButton.onClick = function () {
+      if (self.starPairs.length === 0) return;
+      var mb = new MessageBox("Remove all stars?",
+         TITLE, StdIcon_Question, StdButton_Yes, StdButton_No);
+      if (mb.execute() === StdButton_Yes) {
+         self.starPairs = [];
+         self.wcsResult = null;
+         self.refreshAll();
+      }
+   };
+
+   this.exportButton = new PushButton(this);
+   this.exportButton.text = "Export...";
+   this.exportButton.toolTip = "Export star pair data to JSON file";
+   this.exportButton.onClick = function () {
+      self.doExport();
+   };
+
+   this.importButton = new PushButton(this);
+   this.importButton.text = "Import...";
+   this.importButton.toolTip = "Import star pair data from JSON file";
+   this.importButton.onClick = function () {
+      self.doImport();
+   };
+
+   var starButtonSizer = new HorizontalSizer;
+   starButtonSizer.spacing = 4;
+   starButtonSizer.add(this.editStarButton);
+   starButtonSizer.add(this.removeStarButton);
+   starButtonSizer.add(this.clearStarsButton);
+   starButtonSizer.addSpacing(12);
+   starButtonSizer.add(this.exportButton);
+   starButtonSizer.add(this.importButton);
+   starButtonSizer.addStretch();
+
+   // --- Status label ---
+   this.statusLabel = new Label(this);
+   this.statusLabel.text = "Click on stars in the image to register them.";
+   this.statusLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+
+   // --- Main buttons ---
+   this.solveButton = new PushButton(this);
+   this.solveButton.text = "Solve";
+   this.solveButton.icon = this.scaledResource(":/icons/ok.png");
+   this.solveButton.toolTip = "Run WCS fitting (requires 4+ stars)";
+   this.solveButton.onClick = function () {
+      self.doSolve();
+   };
+
+   this.applyButton = new PushButton(this);
+   this.applyButton.text = "Apply to Image";
+   this.applyButton.icon = this.scaledResource(":/icons/execute.png");
+   this.applyButton.toolTip = "Apply WCS to image";
+   this.applyButton.enabled = false;
+   this.applyButton.onClick = function () {
+      self.doApply();
+   };
+
+   this.closeButton = new PushButton(this);
+   this.closeButton.text = "Close";
+   this.closeButton.icon = this.scaledResource(":/icons/cancel.png");
+   this.closeButton.onClick = function () {
+      self.cancel();
+   };
+
+   var mainButtonSizer = new HorizontalSizer;
+   mainButtonSizer.addStretch();
+   mainButtonSizer.spacing = 8;
+   mainButtonSizer.add(this.solveButton);
+   mainButtonSizer.add(this.applyButton);
+   mainButtonSizer.add(this.closeButton);
+
+   // --- Overall layout ---
+   this.sizer = new VerticalSizer;
+   this.sizer.margin = 8;
+   this.sizer.spacing = 6;
+   this.sizer.add(toolbarSizer);
+   this.sizer.add(this.preview, 100);
+   this.sizer.add(starTableLabel);
+   this.sizer.add(this.starTreeBox, 30);
+   this.sizer.add(starButtonSizer);
+   this.sizer.add(this.statusLabel);
+   this.sizer.addSpacing(4);
+   this.sizer.add(mainButtonSizer);
+
+   this.resize(900, 700);
+
+   // Initial display: fit to window (deferred execution)
+   this.onShow = function () {
+      self.preview.fitToWindow();
+   };
 }
 
+ManualSolverDialog.prototype = new Dialog;
+
+//----------------------------------------------------------------------------
+// Image click handler
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.onImageClicked = function (imgX, imgY) {
+   // Centroid computation
+   var centroid = computeCentroid(this.image, imgX, imgY, 10);
+   var cx = centroid ? centroid.x : imgX;
+   var cy = centroid ? centroid.y : imgY;
+
+   // Out-of-bounds check
+   if (cx < 0 || cx >= this.image.width || cy < 0 || cy >= this.image.height) return;
+
+   var starIndex = this.starPairs.length + 1;
+   var starData = { px: cx, py: cy, ra: null, dec: null, name: "" };
+
+   var dlg = new StarEditDialog(this, starIndex, starData);
+   if (dlg.execute()) {
+      this.starPairs.push(dlg.starData);
+      this.wcsResult = null;
+      this.refreshAll();
+   }
+};
+
+//----------------------------------------------------------------------------
+// Edit star
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.editStar = function (index) {
+   var existing = this.starPairs[index];
+   var starData = { px: existing.px, py: existing.py, ra: existing.ra, dec: existing.dec, name: existing.name };
+
+   var dlg = new StarEditDialog(this, index + 1, starData);
+   if (dlg.execute()) {
+      this.starPairs[index] = dlg.starData;
+      this.wcsResult = null;
+      this.refreshAll();
+   }
+};
+
+//----------------------------------------------------------------------------
+// UI update
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.refreshAll = function () {
+   // Update TreeBox
+   this.starTreeBox.clear();
+   for (var i = 0; i < this.starPairs.length; i++) {
+      var s = this.starPairs[i];
+      var node = new TreeBoxNode(this.starTreeBox);
+      node.setText(0, "" + (i + 1));
+      node.setAlignment(0, TextAlign_Left | TextAlign_VertCenter);
+      node.setText(1, s.px.toFixed(1));
+      node.setText(2, s.py.toFixed(1));
+      node.setText(3, s.name || "");
+      node.setText(4, raToHMS(s.ra) + " / " + decToDMS(s.dec));
+
+      // Residual
+      if (this.wcsResult && this.wcsResult.residuals && this.wcsResult.residuals[i]) {
+         node.setText(5, this.wcsResult.residuals[i].residual_arcsec.toFixed(2) + "\"");
+      } else {
+         node.setText(5, "");
+      }
+   }
+
+   // Update markers
+   this.preview.starMarkers = [];
+   for (var i = 0; i < this.starPairs.length; i++) {
+      this.preview.starMarkers.push({
+         imgX: this.starPairs[i].px,
+         imgY: this.starPairs[i].py,
+         index: i
+      });
+   }
+   this.preview.viewport.update();
+
+   // Update status
+   var nStars = this.starPairs.length;
+   var statusText = nStars + " star" + (nStars !== 1 ? "s" : "") + " registered";
+   if (this.wcsResult && this.wcsResult.success) {
+      statusText += " | RMS " + this.wcsResult.rms_arcsec.toFixed(2) + "\""
+         + " | Scale " + this.wcsResult.pixelScale_arcsec.toFixed(2) + "\"/px";
+   }
+   this.statusLabel.text = statusText;
+
+   // Button state
+   this.applyButton.enabled = (this.wcsResult !== null && this.wcsResult.success);
+};
+
+//----------------------------------------------------------------------------
+// Rebuild bitmap (on stretch mode change)
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.updateStretchButtons = function () {
+   this.stretchNoneButton.text = (this.stretchMode === "none") ? "\u25B6None" : "None";
+   this.stretchLinkedButton.text = (this.stretchMode === "linked") ? "\u25B6Linked" : "Linked";
+   this.stretchUnlinkedButton.text = (this.stretchMode === "unlinked") ? "\u25B6Unlinked" : "Unlinked";
+};
+
+ManualSolverDialog.prototype.rebuildBitmap = function () {
+   this.cursor = new Cursor(StdCursor_Wait);
+   processEvents();
+   console.writeln("Rebuilding bitmap (" + this.stretchMode + ")...");
+   console.flush();
+   var bmpResult = createStretchedBitmap(this.image, MAX_BITMAP_EDGE, this.stretchMode);
+   this.preview.setBitmap(bmpResult);
+   console.writeln("  Done.");
+   this.cursor = new Cursor(StdCursor_Arrow);
+};
+
+//----------------------------------------------------------------------------
+// Solve
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.doSolve = function () {
+   if (this.starPairs.length < 4) {
+      var mb = new MessageBox(
+         "At least 4 star pairs required (current: " + this.starPairs.length + ").",
+         TITLE, StdIcon_Warning, StdButton_Ok);
+      mb.execute();
+      return;
+   }
+
+   var fitter = new WCSFitter(this.starPairs, this.image.width, this.image.height);
+   this.wcsResult = fitter.solve();
+
+   if (!this.wcsResult.success) {
+      var mb = new MessageBox("WCS fitting failed:\n" + this.wcsResult.message,
+         TITLE, StdIcon_Error, StdButton_Ok);
+      mb.execute();
+      this.refreshAll();
+      return;
+   }
+
+   console.writeln("");
+   console.writeln("<b>WCS Fitting Result:</b>");
+   console.writeln("  RMS: " + this.wcsResult.rms_arcsec.toFixed(3) + " arcsec");
+   console.writeln("  Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px");
+   console.writeln("  Stars: " + this.starPairs.length);
+
+   this.refreshAll();
+};
+
+//----------------------------------------------------------------------------
+// Apply to Image
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.doApply = function () {
+   if (!this.wcsResult || !this.wcsResult.success) return;
+
+   console.writeln("");
+   console.writeln("<b>Applying WCS to image...</b>");
+
+   applyWCSToImage(this.targetWindow, this.wcsResult, this.image.width, this.image.height);
+
+   // Console output
+   var wcsObj = {
+      crval1: this.wcsResult.crval1, crval2: this.wcsResult.crval2,
+      crpix1: this.wcsResult.crpix1, crpix2: this.wcsResult.crpix2,
+      cd1_1: this.wcsResult.cd[0][0], cd1_2: this.wcsResult.cd[0][1],
+      cd2_1: this.wcsResult.cd[1][0], cd2_2: this.wcsResult.cd[1][1]
+   };
+   console.writeln("  Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px");
+   displayStarPairs(this.starPairs, this.wcsResult.residuals);
+   displayImageCoordinates(wcsObj, this.image.width, this.image.height);
+
+   console.writeln("");
+   console.writeln("<b>WCS applied successfully.</b>");
+
+   // Save session on successful Apply
+   this.saveSessionData();
+
+   var mb = new MessageBox(
+      "WCS applied successfully.\n\n"
+      + "RMS: " + this.wcsResult.rms_arcsec.toFixed(3) + " arcsec\n"
+      + "Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px\n"
+      + "Stars: " + this.starPairs.length,
+      TITLE, StdIcon_Information, StdButton_Ok);
+   mb.execute();
+};
+
 //============================================================================
-// メイン実行
+// Session save/restore
+//============================================================================
+
+#define SETTINGS_KEY "ManualImageSolver/sessionData"
+
+// Save session data to Settings
+function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs) {
+   var data = {
+      imageId: imageId,
+      imageWidth: imageWidth,
+      imageHeight: imageHeight,
+      stretchMode: stretchMode,
+      starPairs: []
+   };
+   for (var i = 0; i < starPairs.length; i++) {
+      var s = starPairs[i];
+      data.starPairs.push({
+         px: s.px, py: s.py,
+         ra: s.ra, dec: s.dec,
+         name: s.name || ""
+      });
+   }
+   Settings.write(SETTINGS_KEY, DataType_String, JSON.stringify(data));
+}
+
+// Load session data from Settings
+// On success: parsed object, on failure: null
+function loadSession() {
+   var raw = Settings.read(SETTINGS_KEY, DataType_String);
+   if (!raw || raw.length === 0) return null;
+   try {
+      var data = JSON.parse(raw);
+      if (!data || !data.starPairs || data.starPairs.length === 0) return null;
+      return data;
+   } catch (e) {
+      return null;
+   }
+}
+
+//----------------------------------------------------------------------------
+// Save session on dialog close
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.saveSessionData = function () {
+   if (this.starPairs.length > 0) {
+      saveSession(
+         this.targetWindow.mainView.id,
+         this.image.width,
+         this.image.height,
+         this.stretchMode,
+         this.starPairs
+      );
+      console.writeln("Session data saved (" + this.starPairs.length + " stars).");
+   }
+};
+
+//----------------------------------------------------------------------------
+// Export: Write star pair data to JSON file
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.doExport = function () {
+   if (this.starPairs.length === 0) {
+      var mb = new MessageBox("No star pairs to export.",
+         TITLE, StdIcon_Warning, StdButton_Ok);
+      mb.execute();
+      return;
+   }
+
+   var sfd = new SaveFileDialog;
+   sfd.caption = "Export Star Pair Data";
+   sfd.filters = [["JSON files", "*.json"]];
+   sfd.selectedFileExtension = ".json";
+
+   if (!sfd.execute()) return;
+
+   var data = {
+      imageId: this.targetWindow.mainView.id,
+      imageWidth: this.image.width,
+      imageHeight: this.image.height,
+      stretchMode: this.stretchMode,
+      starPairs: []
+   };
+   for (var i = 0; i < this.starPairs.length; i++) {
+      var s = this.starPairs[i];
+      data.starPairs.push({
+         px: s.px, py: s.py,
+         ra: s.ra, dec: s.dec,
+         name: s.name || ""
+      });
+   }
+
+   var json = JSON.stringify(data, null, 2);
+   try {
+      var f = new File;
+      f.createForWriting(sfd.fileName);
+      f.write(ByteArray.stringToUTF8(json));
+      f.close();
+      console.writeln("Star pair data exported: " + sfd.fileName);
+      var mb = new MessageBox("Star pair data exported (" + this.starPairs.length + " stars).",
+         TITLE, StdIcon_Information, StdButton_Ok);
+      mb.execute();
+   } catch (e) {
+      var mb = new MessageBox("Failed to write file:\n" + e.message,
+         TITLE, StdIcon_Error, StdButton_Ok);
+      mb.execute();
+   }
+};
+
+//----------------------------------------------------------------------------
+// Import: Read star pair data from JSON file
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.doImport = function () {
+   var ofd = new OpenFileDialog;
+   ofd.caption = "Import Star Pair Data";
+   ofd.filters = [["JSON files", "*.json"]];
+
+   if (!ofd.execute()) return;
+
+   try {
+      var f = new File;
+      f.openForReading(ofd.fileName);
+      var buf = f.read(DataType_ByteArray, f.size);
+      f.close();
+      var json = buf.utf8ToString();
+      var data = JSON.parse(json);
+   } catch (e) {
+      var mb = new MessageBox("Failed to read file:\n" + e.message,
+         TITLE, StdIcon_Error, StdButton_Ok);
+      mb.execute();
+      return;
+   }
+
+   if (!data || !data.starPairs || data.starPairs.length === 0) {
+      var mb = new MessageBox("No valid star pair data found.",
+         TITLE, StdIcon_Warning, StdButton_Ok);
+      mb.execute();
+      return;
+   }
+
+   // Image size check
+   if (data.imageWidth && data.imageHeight) {
+      if (data.imageWidth !== this.image.width || data.imageHeight !== this.image.height) {
+         var mb = new MessageBox(
+            "Image size mismatch.\n"
+            + "File: " + data.imageWidth + " x " + data.imageHeight + "\n"
+            + "Current image: " + this.image.width + " x " + this.image.height + "\n\n"
+            + "Import anyway?",
+            TITLE, StdIcon_Warning, StdButton_Yes, StdButton_No);
+         if (mb.execute() !== StdButton_Yes) return;
+      }
+   }
+
+   // Confirm if existing star pairs are present
+   if (this.starPairs.length > 0) {
+      var mb = new MessageBox(
+         "Replace current star pairs (" + this.starPairs.length + ")?\nSelect 'No' to append instead.",
+         TITLE, StdIcon_Question, StdButton_Yes, StdButton_No);
+      if (mb.execute() === StdButton_Yes) {
+         this.starPairs = [];
+      }
+   }
+
+   // Add star pairs
+   for (var i = 0; i < data.starPairs.length; i++) {
+      var s = data.starPairs[i];
+      if (typeof s.px === "number" && typeof s.py === "number"
+         && typeof s.ra === "number" && typeof s.dec === "number") {
+         this.starPairs.push({
+            px: s.px, py: s.py,
+            ra: s.ra, dec: s.dec,
+            name: s.name || ""
+         });
+      }
+   }
+
+   // Restore stretch mode
+   if (data.stretchMode && data.stretchMode !== this.stretchMode) {
+      var modes = ["none", "linked", "unlinked"];
+      if (modes.indexOf(data.stretchMode) >= 0) {
+         this.stretchMode = data.stretchMode;
+         this.updateStretchButtons();
+         this.rebuildBitmap();
+      }
+   }
+
+   this.wcsResult = null;
+   this.refreshAll();
+
+   console.writeln("Star pair data imported: " + ofd.fileName
+      + " (" + data.starPairs.length + " stars)");
+};
+
+//============================================================================
+// Main execution
 //============================================================================
 
 function main() {
-   // 1. アクティブ画像チェック
    if (ImageWindow.activeWindow.isNull) {
       var mb = new MessageBox(
-         "画像が開かれていません。\n先に画像を開いてからスクリプトを実行してください。",
+         "No image is open.\nPlease open an image before running this script.",
          TITLE, StdIcon_Error, StdButton_Ok);
       mb.execute();
       return;
    }
 
-   var window = ImageWindow.activeWindow;
-   var image = window.mainView.image;
+   var targetWindow = ImageWindow.activeWindow;
+   var image = targetWindow.mainView.image;
 
    console.writeln("<b>" + TITLE + " v" + VERSION + "</b>");
    console.writeln("---");
-   console.writeln("Image: " + window.mainView.id +
-      " (" + image.width + " x " + image.height + " px)");
+   console.writeln("Image: " + targetWindow.mainView.id
+      + " (" + image.width + " x " + image.height + " px)");
 
-   // 2. 設定ロード + 検証
-   var params = new ManualSolverParameters();
-   params.load();
-
-   // 未設定、またはパスが無効な場合はダイアログ表示
-   var needSettings = !params.isConfigured();
-   if (!needSettings) {
-      // 保存済み設定の検証
-      var mainPy = params.scriptDir + "/python/main.py";
-      if (!File.exists(params.pythonPath) || !File.exists(mainPy)) {
-         console.warningln("保存済みの設定パスが無効です。設定ダイアログを表示します。");
-         needSettings = true;
-      }
-   }
-
-   if (needSettings) {
-      console.writeln("Python パスとスクリプトディレクトリを設定してください。");
-      var settingsDlg = new SettingsDialog(params);
-      if (!settingsDlg.execute()) {
-         console.writeln("設定がキャンセルされました。");
-         return;
-      }
-      params.save();
-   }
-
-   console.writeln("Python: " + params.pythonPath);
-   console.writeln("Script: " + params.scriptDir);
-
-   // 3. アクティブ画像を一時 FITS に保存
-   var tempInput = File.systemTempDirectory + "/manual_solver_input.fits";
-   var tempOutput = File.systemTempDirectory + "/manual_solver_output.wcs.json";
-
-   // 既存の一時ファイルを削除
-   if (File.exists(tempInput)) {
-      try { File.remove(tempInput); } catch (e) {}
-   }
-   if (File.exists(tempOutput)) {
-      try { File.remove(tempOutput); } catch (e) {}
-   }
-
-   console.writeln("一時 FITS に保存中...");
-   try {
-      saveImageToFits(window, tempInput);
-   } catch (e) {
-      var mb = new MessageBox("一時ファイル保存に失敗:\n" + e.message,
-         TITLE, StdIcon_Error, StdButton_Ok);
-      mb.execute();
-      return;
-   }
-   console.writeln("保存完了: " + tempInput);
-
-   // 4. Python GUI 起動（ExternalProcess）
-   var scriptPath = params.scriptDir + "/python/main.py";
-   var pythonDir = File.extractDirectory(params.pythonPath);
-   var pathPrefix = "export PATH="
-      + quotePath(pythonDir)
-      + ":/opt/homebrew/bin:/usr/local/bin:$PATH; ";
-
-   // PYTHONPATH をスクリプトの python/ ディレクトリに設定
-   var pythonPathEnv = "export PYTHONPATH="
-      + quotePath(params.scriptDir + "/python")
-      + ":$PYTHONPATH; ";
-
-   var stderrFile = File.systemTempDirectory + "/manual_solver_stderr.log";
-
-   // 前回の JSON が存在するなら --restore オプションを追加
-   var restoreJson = params.lastWcsJson;
-   var useRestore = false;
-   if (restoreJson && restoreJson.length > 0 && File.exists(restoreJson)) {
-      var mb = new MessageBox(
-         "前回のセッションの星ペア情報があります。\n復元しますか？",
-         TITLE, StdIcon_Question, StdButton_Yes, StdButton_No);
+   // Check for session restore
+   var restoredStarPairs = null;
+   var restoredStretchMode = null;
+   var sessionData = loadSession();
+   if (sessionData
+       && sessionData.imageWidth === image.width
+       && sessionData.imageHeight === image.height) {
+      var msg = "Previous session data found.\n\n"
+         + "Image: " + (sessionData.imageId || "(unknown)") + "\n"
+         + "Star pairs: " + sessionData.starPairs.length + "\n\n"
+         + "Restore?";
+      var mb = new MessageBox(msg, TITLE, StdIcon_Question, StdButton_Yes, StdButton_No);
       if (mb.execute() === StdButton_Yes) {
-         useRestore = true;
+         restoredStarPairs = sessionData.starPairs;
+         restoredStretchMode = sessionData.stretchMode || "linked";
+         console.writeln("Restoring session (" + restoredStarPairs.length + " stars).");
       }
    }
 
-   var shellCmd = pathPrefix + pythonPathEnv
-      + quotePath(params.pythonPath) + " "
-      + quotePath(scriptPath)
-      + " --input " + quotePath(tempInput)
-      + " --output " + quotePath(tempOutput);
+   var dlg = new ManualSolverDialog(targetWindow);
 
-   if (useRestore) {
-      shellCmd += " --restore " + quotePath(restoreJson);
+   // Session restore: apply star pairs and stretch mode
+   if (restoredStarPairs) {
+      dlg.starPairs = restoredStarPairs;
+      if (restoredStretchMode && restoredStretchMode !== dlg.stretchMode) {
+         dlg.stretchMode = restoredStretchMode;
+         dlg.updateStretchButtons();
+         dlg.rebuildBitmap();
+      }
+      dlg.refreshAll();
    }
 
-   shellCmd += " 2> " + quotePath(stderrFile);
+   dlg.execute();
 
-   console.writeln("Python GUI を起動中...");
-   console.writeln("Command: " + shellCmd);
-
-   var P = new ExternalProcess;
-   P.workingDirectory = params.scriptDir;
-   P.start("/bin/sh", ["-c", shellCmd]);
-
-   // 5. ポーリングループで完了待ち
-   console.abortEnabled = true;
-   console.writeln("");
-   console.writeln("<b>Python GUI で星の選択と Solve を行ってください。</b>");
-   console.writeln("Process Console の <b>Abort</b> ボタンでキャンセルできます。");
-   console.flush();
-
-   var timeoutMs = 60 * 60 * 1000; // 1時間（手動操作のため長め）
-   var pollIntervalMs = 500;
-   var elapsed = 0;
-   var aborted = false;
-   var lastStderrSize = 0;
-
-   while (elapsed < timeoutMs) {
-      if (P.waitForFinished(pollIntervalMs)) {
-         break;
-      }
-
-      processEvents();
-
-      if (console.abortRequested) {
-         console.writeln("");
-         console.warningln("<b>ユーザーにより中止されました。プロセスを終了中...</b>");
-         P.kill();
-         aborted = true;
-         break;
-      }
-
-      // stderr をリアルタイム表示
-      try {
-         if (File.exists(stderrFile)) {
-            var currentStderr = File.readTextFile(stderrFile);
-            if (currentStderr.length > lastStderrSize) {
-               var newOutput = currentStderr.substring(lastStderrSize).trim();
-               if (newOutput.length > 0) {
-                  var newLines = newOutput.split("\n");
-                  for (var li = 0; li < newLines.length; li++) {
-                     console.writeln("[PYTHON] " + newLines[li]);
-                  }
-                  console.flush();
-               }
-               lastStderrSize = currentStderr.length;
-            }
-         }
-      } catch (e) {
-         // ファイル読み込み失敗は無視
-      }
-
-      elapsed += pollIntervalMs;
-   }
-
-   console.abortEnabled = false;
-
-   // Abort 処理
-   if (aborted) {
-      try { if (File.exists(tempInput)) File.remove(tempInput); } catch (e) {}
-      try { if (File.exists(tempOutput)) File.remove(tempOutput); } catch (e) {}
-      try { if (File.exists(stderrFile)) File.remove(stderrFile); } catch (e) {}
-      console.warningln("処理が中止されました。");
-      return;
-   }
-
-   // タイムアウト処理
-   if (elapsed >= timeoutMs && !P.waitForFinished(0)) {
-      P.kill();
-      try { if (File.exists(tempInput)) File.remove(tempInput); } catch (e) {}
-      try { if (File.exists(tempOutput)) File.remove(tempOutput); } catch (e) {}
-      try { if (File.exists(stderrFile)) File.remove(stderrFile); } catch (e) {}
-      var mb = new MessageBox("タイムアウトしました（1時間）。",
-         TITLE, StdIcon_Error, StdButton_Ok);
-      mb.execute();
-      return;
-   }
-
-   // 残りの stderr を表示
-   try {
-      if (File.exists(stderrFile)) {
-         var finalStderr = File.readTextFile(stderrFile);
-         if (finalStderr.length > lastStderrSize) {
-            var remaining = finalStderr.substring(lastStderrSize).trim();
-            if (remaining.length > 0) {
-               var lines = remaining.split("\n");
-               for (var i = 0; i < lines.length; i++) {
-                  console.writeln("[PYTHON] " + lines[i]);
-               }
-            }
-         }
-         File.remove(stderrFile);
-      }
-   } catch (e) {}
+   // Save session on dialog close
+   dlg.saveSessionData();
 
    console.writeln("");
-   console.writeln("Python GUI 終了 (exit code: " + P.exitCode + ")");
-
-   // 6. 終了コード判定
-   if (P.exitCode !== 0) {
-      // ユーザーキャンセル (exit code 1) またはエラー
-      try { if (File.exists(tempInput)) File.remove(tempInput); } catch (e) {}
-      try { if (File.exists(tempOutput)) File.remove(tempOutput); } catch (e) {}
-      if (P.exitCode === 1) {
-         console.writeln("ユーザーによりキャンセルされました。");
-      } else {
-         console.warningln("Python GUI がエラーで終了しました (exit code: " + P.exitCode + ")");
-      }
-      return;
-   }
-
-   // 7. JSON 結果読み込み + WCS 適用
-   if (!File.exists(tempOutput)) {
-      try { if (File.exists(tempInput)) File.remove(tempInput); } catch (e) {}
-      console.warningln("WCS JSON ファイルが見つかりません: " + tempOutput);
-      return;
-   }
-
-   var jsonText;
-   try {
-      jsonText = File.readTextFile(tempOutput);
-   } catch (e) {
-      var mb = new MessageBox("JSON ファイルの読み込みに失敗:\n" + e.message,
-         TITLE, StdIcon_Error, StdButton_Ok);
-      mb.execute();
-      try { if (File.exists(tempInput)) File.remove(tempInput); } catch (e2) {}
-      try { if (File.exists(tempOutput)) File.remove(tempOutput); } catch (e2) {}
-      return;
-   }
-
-   var wcsData;
-   try {
-      wcsData = JSON.parse(jsonText);
-   } catch (e) {
-      var mb = new MessageBox("JSON の解析に失敗:\n" + e.message,
-         TITLE, StdIcon_Error, StdButton_Ok);
-      mb.execute();
-      try { if (File.exists(tempInput)) File.remove(tempInput); } catch (e2) {}
-      try { if (File.exists(tempOutput)) File.remove(tempOutput); } catch (e2) {}
-      return;
-   }
-
-   // バージョンチェック
-   if (!wcsData.version || !wcsData.version.match(/^1\./)) {
-      var mb = new MessageBox("未対応の WCS JSON バージョン: " + (wcsData.version || "不明"),
-         TITLE, StdIcon_Error, StdButton_Ok);
-      mb.execute();
-      try { if (File.exists(tempInput)) File.remove(tempInput); } catch (e) {}
-      try { if (File.exists(tempOutput)) File.remove(tempOutput); } catch (e) {}
-      return;
-   }
-
-   // WCSデータ検証
-   if (!wcsData.wcs || wcsData.wcs.crval1 === undefined) {
-      var mb = new MessageBox("WCS データが見つかりません。",
-         TITLE, StdIcon_Error, StdButton_Ok);
-      mb.execute();
-      try { if (File.exists(tempInput)) File.remove(tempInput); } catch (e) {}
-      try { if (File.exists(tempOutput)) File.remove(tempOutput); } catch (e) {}
-      return;
-   }
-
-   // フィット品質情報を表示
-   if (wcsData.fit_quality) {
-      var fq = wcsData.fit_quality;
-      console.writeln("");
-      console.writeln("<b>WCS フィット結果:</b>");
-      if (fq.rms_arcsec !== undefined)
-         console.writeln("  RMS: " + fq.rms_arcsec.toFixed(3) + " arcsec");
-      if (fq.pixel_scale_arcsec !== undefined)
-         console.writeln("  Pixel scale: " + fq.pixel_scale_arcsec.toFixed(3) + " arcsec/px");
-      if (fq.num_stars !== undefined)
-         console.writeln("  Stars: " + fq.num_stars);
-   }
-
-   // WCS を画像に適用
-   console.writeln("");
-   console.writeln("<b>WCS を画像に適用中...</b>");
-   applyWCSFromJSON(window, wcsData);
-   console.writeln("WCS を適用しました。");
-
-   // 星ペア情報と画像座標を表示
-   displayStarPairs(wcsData);
-   displayImageCoordinates(wcsData, image.width, image.height);
-
-   // 8. JSON を永続パスにコピーして Settings に保存（次回復元用）
-   var lastJsonPath = File.systemTempDirectory + "/manual_solver_last.wcs.json";
-   try {
-      if (File.exists(lastJsonPath)) File.remove(lastJsonPath);
-      File.copyFile(lastJsonPath, tempOutput);
-      params.lastWcsJson = lastJsonPath;
-      params.save();
-   } catch (e) {
-      // コピー失敗は無視（次回復元が使えないだけ）
-   }
-
-   // 9. 一時ファイル削除
-   try { if (File.exists(tempInput)) File.remove(tempInput); } catch (e) {}
-   try { if (File.exists(tempOutput)) File.remove(tempOutput); } catch (e) {}
-
-   // 成功メッセージ
-   var successMsg = "WCS を正常に適用しました。";
-   if (wcsData.fit_quality) {
-      var fq = wcsData.fit_quality;
-      if (fq.rms_arcsec !== undefined)
-         successMsg += "\n\nRMS: " + fq.rms_arcsec.toFixed(3) + " arcsec";
-      if (fq.pixel_scale_arcsec !== undefined)
-         successMsg += "\nPixel scale: " + fq.pixel_scale_arcsec.toFixed(3) + " arcsec/px";
-      if (fq.num_stars !== undefined)
-         successMsg += "\nStars: " + fq.num_stars;
-   }
-
-   console.writeln("");
-   console.writeln("<b>" + successMsg.replace(/\n/g, "</b>\n<b>") + "</b>");
-
-   var mb = new MessageBox(successMsg, TITLE, StdIcon_Information, StdButton_Ok);
-   mb.execute();
+   console.writeln(TITLE + " finished.");
 }
 
 main();
