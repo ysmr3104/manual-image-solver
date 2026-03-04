@@ -5,13 +5,13 @@
 //----------------------------------------------------------------------------
 // ManualImageSolver.js - PixInsight JavaScript Runtime (PJSR) Script
 //
-// Manual Image Solver: PJSR ネイティブ Dialog で星を手動同定し、
-// TAN投影 WCS を算出してアクティブ画像に適用する。
+// Manual Image Solver: Manually identify stars in a native PJSR Dialog,
+// compute a TAN-projection WCS, and apply it to the active image.
 //
 // Copyright (c) 2024-2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "2.0.0"
+#define VERSION "1.1.0"
 
 #include <pjsr/DataType.jsh>
 #include <pjsr/StdIcon.jsh>
@@ -27,14 +27,14 @@
 
 #define TITLE "Manual Image Solver"
 
-// Bitmap 最大辺（メモリ対策）
+// Maximum bitmap edge size (memory optimization)
 #define MAX_BITMAP_EDGE 2048
 
 //============================================================================
-// ユーティリティ関数（既存から再利用）
+// Utility functions
 //============================================================================
 
-// WCS関連のFITSキーワードかどうかを判定
+// Check if a FITS keyword name is WCS-related
 function isWCSKeyword(name) {
    var wcsNames = [
       "CRVAL1", "CRVAL2", "CRPIX1", "CRPIX2",
@@ -53,7 +53,7 @@ function isWCSKeyword(name) {
    return false;
 }
 
-// FITSKeywordの型を値から判定して適切なFITSKeywordオブジェクトを生成
+// Determine FITSKeyword type from value and create the appropriate FITSKeyword object
 function makeFITSKeyword(name, value) {
    var strVal = value.toString();
    if (strVal === "T" || strVal === "true") {
@@ -73,10 +73,10 @@ function makeFITSKeyword(name, value) {
 }
 
 //============================================================================
-// 座標フォーマット・表示関数
+// Coordinate formatting and display functions
 //============================================================================
 
-// RA (度) → "HH MM SS.ss" 形式に変換
+// Convert RA (degrees) to "HH MM SS.ss" format
 function raToHMS(raDeg) {
    var ra = raDeg;
    while (ra < 0) ra += 360.0;
@@ -92,7 +92,7 @@ function raToHMS(raDeg) {
    return hStr + " " + mStr + " " + sStr;
 }
 
-// DEC (度) → "+DD MM SS.s" 形式に変換
+// Convert DEC (degrees) to "+DD MM SS.s" format
 function decToDMS(decDeg) {
    var sign = decDeg >= 0 ? "+" : "-";
    var dec = Math.abs(decDeg);
@@ -107,7 +107,7 @@ function decToDMS(decDeg) {
    return sign + dStr + " " + mStr + " " + sStr;
 }
 
-// ピクセル座標 → 天球座標変換（WCS パラメータ使用）
+// Convert pixel coordinates to celestial coordinates (using WCS parameters)
 function pixelToRaDec(wcs, px, py, imageHeight) {
    var u = (px + 1.0) - wcs.crpix1;
    var v = (imageHeight - py) - wcs.crpix2;
@@ -116,7 +116,7 @@ function pixelToRaDec(wcs, px, py, imageHeight) {
    return tanDeproject([wcs.crval1, wcs.crval2], [xi, eta]);
 }
 
-// 画像四隅・中央の座標をコンソールに表示
+// Display coordinates of image corners and center to the console
 function displayImageCoordinates(wcs, imageWidth, imageHeight) {
    var center = pixelToRaDec(wcs, imageWidth / 2.0, imageHeight / 2.0, imageHeight);
    var tl = pixelToRaDec(wcs, 0, 0, imageHeight);
@@ -140,7 +140,7 @@ function displayImageCoordinates(wcs, imageWidth, imageHeight) {
    console.writeln("  Rotation ...... " + rotationDeg.toFixed(2) + " deg");
 }
 
-// 星ペア情報をコンソールに表示
+// Display star pair information to the console
 function displayStarPairs(starPairs, residuals) {
    if (!starPairs || starPairs.length === 0) return;
    console.writeln("");
@@ -157,11 +157,11 @@ function displayStarPairs(starPairs, residuals) {
 }
 
 //============================================================================
-// 座標パース関数（Python star_dialog.py から移植）
+// Coordinate parsing functions (ported from Python star_dialog.py)
 //============================================================================
 
-// RA入力をパース（HMS "HH MM SS.ss" / "HH:MM:SS.ss" または度数）
-// 成功時: 度数 (0-360)、失敗時: null
+// Parse RA input (HMS "HH MM SS.ss" / "HH:MM:SS.ss" or degrees)
+// On success: degrees (0-360), on failure: null
 function parseRAInput(text) {
    if (typeof text !== "string") return null;
    text = text.trim();
@@ -182,8 +182,8 @@ function parseRAInput(text) {
    return null;
 }
 
-// DEC入力をパース（DMS "±DD MM SS.ss" / "±DD:MM:SS.ss" または度数）
-// 成功時: 度数 (-90〜+90)、失敗時: null
+// Parse DEC input (DMS "+/-DD MM SS.ss" / "+/-DD:MM:SS.ss" or degrees)
+// On success: degrees (-90 to +90), on failure: null
 function parseDECInput(text) {
    if (typeof text !== "string") return null;
    text = text.trim();
@@ -213,7 +213,7 @@ function parseDECInput(text) {
 }
 
 //============================================================================
-// WCS 適用関数
+// WCS application function
 //============================================================================
 
 function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
@@ -240,7 +240,7 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
    cleanedKw.push(makeFITSKeyword("EQUINOX", 2000.0));
    cleanedKw.push(makeFITSKeyword("PLTSOLVD", "T"));
 
-   // 画像中心の RA/DEC を OBJCTRA/OBJCTDEC として書き込み
+   // Write image center RA/DEC as OBJCTRA/OBJCTDEC
    var wcsObj = {
       crval1: wcsResult.crval1, crval2: wcsResult.crval2,
       crpix1: wcsResult.crpix1, crpix2: wcsResult.crpix2,
@@ -256,7 +256,7 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
 }
 
 //============================================================================
-// Sesame 天体名検索（ExternalProcess + curl）
+// Sesame object name search (ExternalProcess + curl)
 //============================================================================
 
 function searchObjectCoordinates(objectName) {
@@ -300,46 +300,46 @@ function searchObjectCoordinates(objectName) {
 }
 
 //============================================================================
-// オートストレッチ（MTF ベース）+ Bitmap 生成
+// Auto stretch (MTF-based) + Bitmap generation
 //============================================================================
 
-// PixInsight STF 方式: median + MAD ベースの MTF パラメータ計算
-// channel: 統計量を取得するチャンネル番号（デフォルト 0）
+// PixInsight STF method: median + MAD based MTF parameter computation
+// channel: channel number for statistics (default 0)
 function computeAutoSTF(image, channel) {
    if (typeof channel === "undefined") channel = 0;
-   // 指定チャンネルの統計量を取得（selectedChannel でチャンネル指定）
+   // Get statistics for the specified channel (using selectedChannel)
    var savedChannel = image.selectedChannel;
    image.selectedChannel = channel;
    var median = image.median();
 
-   // MAD を取得（PJSR バージョンによっては未実装の可能性）
+   // Get MAD (may not be implemented in some PJSR versions)
    var mad;
    try {
       mad = image.MAD();
    } catch (e) {
-      // MAD が未実装の場合は avgDev * 1.4826 で近似
+      // Approximate MAD with avgDev * 1.4826 if MAD is not implemented
       mad = image.avgDev() * 1.4826;
    }
    image.selectedChannel = savedChannel;
 
-   // MAD が 0 の場合（一様画像）のフォールバック
+   // Fallback for uniform images where MAD is 0
    if (mad === 0 || mad < 1e-15) {
       return { shadowClip: 0.0, midtone: 0.5 };
    }
 
-   // STF パラメータ（PixInsight デフォルト）
-   var targetMedian = 0.25;    // 目標中央値
-   var shadowClipK = -2.8;     // シャドウクリッピング係数
+   // STF parameters (PixInsight defaults)
+   var targetMedian = 0.25;    // Target median
+   var shadowClipK = -2.8;     // Shadow clipping coefficient
 
    var shadow = median + shadowClipK * mad;
    if (shadow < 0) shadow = 0;
 
-   // 中間調関数のパラメータ: median をストレッチ後 targetMedian にマッピング
+   // Midtone function parameter: map median to targetMedian after stretch
    var normalizedMedian = (median - shadow) / (1.0 - shadow);
    if (normalizedMedian <= 0) normalizedMedian = 1e-6;
    if (normalizedMedian >= 1) normalizedMedian = 1 - 1e-6;
 
-   // MTF パラメータ m を計算: MTF(m, normalizedMedian) = targetMedian
+   // Compute MTF parameter m: MTF(m, normalizedMedian) = targetMedian
    // m = (targetMedian - 1) * normalizedMedian / ((2*targetMedian - 1) * normalizedMedian - targetMedian)
    var m = (targetMedian - 1.0) * normalizedMedian /
            ((2.0 * targetMedian - 1.0) * normalizedMedian - targetMedian);
@@ -349,7 +349,7 @@ function computeAutoSTF(image, channel) {
    return { shadowClip: shadow, midtone: m };
 }
 
-// 中間調転送関数 (MTF)
+// Midtones Transfer Function (MTF)
 function midtonesTransferFunction(m, x) {
    if (x <= 0) return 0;
    if (x >= 1) return 1;
@@ -359,9 +359,9 @@ function midtonesTransferFunction(m, x) {
    return ((m - 1.0) * x) / ((2.0 * m - 1.0) * x - m);
 }
 
-// 画像からストレッチ済み Bitmap を生成
-// maxEdge: 最大辺サイズ（0 = 制限なし）
-// stretchMode: "none" / "linked" / "unlinked"（デフォルト "linked"）
+// Generate a stretched Bitmap from the image
+// maxEdge: maximum edge size (0 = no limit)
+// stretchMode: "none" / "linked" / "unlinked" (default "linked")
 function createStretchedBitmap(image, maxEdge, stretchMode) {
    if (typeof maxEdge === "undefined") maxEdge = MAX_BITMAP_EDGE;
    if (typeof stretchMode === "undefined") stretchMode = "linked";
@@ -369,7 +369,7 @@ function createStretchedBitmap(image, maxEdge, stretchMode) {
    var w = image.width;
    var h = image.height;
 
-   // 縮小率の計算
+   // Compute scale factor
    var scale = 1.0;
    if (maxEdge > 0) {
       var maxDim = Math.max(w, h);
@@ -383,7 +383,7 @@ function createStretchedBitmap(image, maxEdge, stretchMode) {
 
    var isColor = image.numberOfChannels >= 3;
 
-   // STF パラメータ計算（モード別）
+   // Compute STF parameters (per mode)
    var stfR, stfG, stfB;
    if (stretchMode === "linked") {
       stfR = computeAutoSTF(image, 0);
@@ -394,19 +394,19 @@ function createStretchedBitmap(image, maxEdge, stretchMode) {
       stfG = computeAutoSTF(image, 1);
       stfB = computeAutoSTF(image, 2);
    } else if (stretchMode === "unlinked") {
-      // モノクロの場合は linked と同じ
+      // For monochrome, same as linked
       stfR = computeAutoSTF(image, 0);
       stfG = stfR;
       stfB = stfR;
    }
-   // stretchMode === "none" の場合は stf 不要
+   // When stretchMode === "none", STF is not needed
 
-   // Bitmap を直接構築
+   // Build bitmap directly
    var bmp = new Bitmap(bmpW, bmpH);
 
    for (var by = 0; by < bmpH; by++) {
       for (var bx = 0; bx < bmpW; bx++) {
-         // Bitmap 座標 → 元画像座標
+         // Bitmap coordinates -> original image coordinates
          var ix = Math.min(Math.floor(bx / scale), w - 1);
          var iy = Math.min(Math.floor(by / scale), h - 1);
 
@@ -420,12 +420,12 @@ function createStretchedBitmap(image, maxEdge, stretchMode) {
          }
 
          if (stretchMode === "none") {
-            // リニアマッピング: そのまま 0-255 に変換
+            // Linear mapping: directly convert to 0-255
             r = Math.max(0, Math.min(1, r));
             g = Math.max(0, Math.min(1, g));
             b = Math.max(0, Math.min(1, b));
          } else {
-            // シャドウクリップ + 正規化 + MTF（チャンネル別 STF）
+            // Shadow clip + normalize + MTF (per-channel STF)
             r = (r - stfR.shadowClip) / (1.0 - stfR.shadowClip);
             g = (g - stfG.shadowClip) / (1.0 - stfG.shadowClip);
             b = (b - stfB.shadowClip) / (1.0 - stfB.shadowClip);
@@ -435,11 +435,11 @@ function createStretchedBitmap(image, maxEdge, stretchMode) {
             b = midtonesTransferFunction(stfB.midtone, Math.max(0, Math.min(1, b)));
          }
 
-         // 8bit 変換して Bitmap にセット
+         // Convert to 8-bit and set bitmap pixel
          var ri = Math.round(r * 255);
          var gi = Math.round(g * 255);
          var bi = Math.round(b * 255);
-         // ARGB フォーマット: 0xAARRGGBB
+         // ARGB format: 0xAARRGGBB
          bmp.setPixel(bx, by, 0xFF000000 | (ri << 16) | (gi << 8) | bi);
       }
    }
@@ -448,53 +448,53 @@ function createStretchedBitmap(image, maxEdge, stretchMode) {
 }
 
 //============================================================================
-// ImagePreviewControl: 画像表示 + ズーム/パン/クリック
+// ImagePreviewControl: Image display + zoom/pan/click
 //
-// ScrollBox のスクロール管理に依存せず、スクロール状態を自前で管理する。
-// - this.scrollX / this.scrollY: コンテンツオフセット（手動管理）
-// - スクロールバーは setHorizontalScrollRange / setVerticalScrollRange で明示設定
-// - onPaint ではオフセット付きで描画
+// Manages scroll state internally rather than relying on ScrollBox.
+// - this.scrollX / this.scrollY: content offset (manually managed)
+// - Scrollbars set explicitly via setHorizontalScrollRange / setVerticalScrollRange
+// - onPaint draws with offset applied
 //============================================================================
 
 function ImagePreviewControl(parent) {
    this.__base__ = ScrollBox;
    this.__base__(parent);
 
-   this.bitmap = null;        // ストレッチ済み Bitmap
-   this.bitmapScale = 1.0;    // 元画像→Bitmap の縮小率
-   this.zoomLevel = 1.0;      // 表示ズーム倍率
+   this.bitmap = null;        // Stretched bitmap
+   this.bitmapScale = 1.0;    // Original image -> bitmap scale factor
+   this.zoomLevel = 1.0;      // Display zoom level
    this.starMarkers = [];     // [{imgX, imgY, index}]
-   this.selectedIndex = -1;   // 選択中のマーカーindex
-   this.onImageClick = null;  // コールバック: function(imgX, imgY)
+   this.selectedIndex = -1;   // Currently selected marker index
+   this.onImageClick = null;  // Callback: function(imgX, imgY)
 
-   // 手動スクロール管理
+   // Manual scroll management
    this.scrollX = 0;
    this.scrollY = 0;
    this.maxScrollX = 0;
    this.maxScrollY = 0;
 
-   // ドラッグ/クリック判定用
-   this.isDragging = false;    // マウスボタン押下中
-   this.hasMoved = false;      // ドラッグ閾値を超えたか
+   // Drag/click detection
+   this.isDragging = false;    // Mouse button is held down
+   this.hasMoved = false;      // Whether drag threshold has been exceeded
    this.dragStartX = 0;
    this.dragStartY = 0;
    this.panScrollX = 0;
    this.panScrollY = 0;
 
-   // ズームレベル候補
+   // Available zoom levels
    this.zoomLevels = [
       0.0625, 0.0833, 0.125, 0.1667, 0.25, 0.3333, 0.5, 0.6667, 0.75,
       1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0
    ];
-   this.zoomIndex = 9; // 初期 = 1.0
+   this.zoomIndex = 9; // Initial = 1.0
 
-   this.autoScrolls = false; // 自前管理のため無効化
+   this.autoScrolls = false; // Disabled in favor of manual management
 
    var self = this;
 
    this.viewport.cursor = new Cursor(StdCursor_Arrow);
 
-   // --- スクロールバーイベント ---
+   // --- Scrollbar events ---
    this.onHorizontalScrollPosUpdated = function (pos) {
       self.scrollX = pos;
       self.viewport.update();
@@ -504,7 +504,7 @@ function ImagePreviewControl(parent) {
       self.viewport.update();
    };
 
-   // --- 描画 ---
+   // --- Paint ---
    this.viewport.onPaint = function () {
       var g = new Graphics(this);
       g.fillRect(this.boundsRect, new Brush(0xFF202020));
@@ -513,16 +513,16 @@ function ImagePreviewControl(parent) {
          var dispW = Math.round(self.bitmap.width * self.zoomLevel);
          var dispH = Math.round(self.bitmap.height * self.zoomLevel);
 
-         // スクロールオフセット付きで描画
+         // Draw with scroll offset
          g.drawScaledBitmap(
             new Rect(-self.scrollX, -self.scrollY,
                      dispW - self.scrollX, dispH - self.scrollY),
             self.bitmap);
 
-         // マーカー描画
+         // Draw markers
          for (var i = 0; i < self.starMarkers.length; i++) {
             var mk = self.starMarkers[i];
-            // 画像座標 → コンテンツ座標 → 表示座標（スクロール差し引き）
+            // Image coords -> content coords -> display coords (minus scroll offset)
             var vx = (mk.imgX * self.bitmapScale) * self.zoomLevel - self.scrollX;
             var vy = (mk.imgY * self.bitmapScale) * self.zoomLevel - self.scrollY;
 
@@ -530,16 +530,16 @@ function ImagePreviewControl(parent) {
             var circleR = isSelected ? 14 : 12;
             var crossR = isSelected ? 8 : 6;
 
-            // 緑の円
+            // Green circle
             g.pen = new Pen(isSelected ? 0xFFFFFF00 : 0xB300FF00, isSelected ? 2 : 1.5);
             g.drawCircle(vx, vy, circleR);
 
-            // 赤の十字
+            // Red crosshair
             g.pen = new Pen(0xCCFF0000, 1.5);
             g.drawLine(vx - crossR, vy, vx + crossR, vy);
             g.drawLine(vx, vy - crossR, vx, vy + crossR);
 
-            // 番号
+            // Number label
             g.pen = new Pen(0xE6FFFF00);
             g.font = new Font("Helvetica", 9);
             g.drawText(vx + circleR + 2, vy - circleR + 2, "" + (i + 1));
@@ -549,8 +549,8 @@ function ImagePreviewControl(parent) {
       g.end();
    };
 
-   // --- マウスイベント ---
-   // 左クリック = 星選択、左ドラッグ = パン、中ボタンドラッグ = パン
+   // --- Mouse events ---
+   // Left click = star selection, left drag = pan, middle button drag = pan
    #define DRAG_THRESHOLD 4
 
    this.viewport.onMousePress = function (x, y, button, buttonState, modifiers) {
@@ -572,7 +572,7 @@ function ImagePreviewControl(parent) {
       var dx = x - self.dragStartX;
       var dy = y - self.dragStartY;
 
-      // 閾値を超えたらドラッグ（パン）開始
+      // Start drag (pan) once threshold is exceeded
       if (!self.hasMoved) {
          if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
             self.hasMoved = true;
@@ -589,7 +589,7 @@ function ImagePreviewControl(parent) {
       if (!self.isDragging) return;
 
       if (!self.hasMoved && button === 1) {
-         // クリック（移動なし）→ 星選択
+         // Click (no movement) -> star selection
          var imgX = (x + self.scrollX) / (self.bitmapScale * self.zoomLevel);
          var imgY = (y + self.scrollY) / (self.bitmapScale * self.zoomLevel);
 
@@ -630,7 +630,7 @@ function ImagePreviewControl(parent) {
          if (!found) return;
       }
 
-      // マウス位置基準でズーム
+      // Zoom centered on mouse position
       var newZoom = self.zoomLevels[self.zoomIndex];
       var factor = newZoom / oldZoom;
       var newScrollX = Math.round((self.scrollX + x) * factor - x);
@@ -645,11 +645,11 @@ function ImagePreviewControl(parent) {
 
 ImagePreviewControl.prototype = new ScrollBox;
 
-// スクロール位置をクランプして設定 + スクロールバー同期 + 再描画
+// Clamp scroll position, sync scrollbars, and repaint
 ImagePreviewControl.prototype.setScroll = function (x, y) {
    this.scrollX = Math.max(0, Math.min(this.maxScrollX, Math.round(x)));
    this.scrollY = Math.max(0, Math.min(this.maxScrollY, Math.round(y)));
-   // スクロールバーを同期
+   // Sync scrollbars
    this.horizontalScrollPosition = this.scrollX;
    this.verticalScrollPosition = this.scrollY;
    this.viewport.update();
@@ -668,21 +668,21 @@ ImagePreviewControl.prototype.updateViewport = function () {
    var dispW = Math.round(this.bitmap.width * this.zoomLevel);
    var dispH = Math.round(this.bitmap.height * this.zoomLevel);
 
-   // 表示領域サイズ
+   // Visible area size
    var viewW = this.viewport.width;
    var viewH = this.viewport.height;
    if (viewW <= 0) viewW = this.width;
    if (viewH <= 0) viewH = this.height;
 
-   // スクロール範囲
+   // Scroll range
    this.maxScrollX = Math.max(0, dispW - viewW);
    this.maxScrollY = Math.max(0, dispH - viewH);
 
-   // クランプ
+   // Clamp
    this.scrollX = Math.max(0, Math.min(this.maxScrollX, this.scrollX));
    this.scrollY = Math.max(0, Math.min(this.maxScrollY, this.scrollY));
 
-   // スクロールバー設定
+   // Scrollbar setup
    this.setHorizontalScrollRange(0, this.maxScrollX);
    this.setVerticalScrollRange(0, this.maxScrollY);
    this.horizontalScrollPosition = this.scrollX;
@@ -710,7 +710,7 @@ ImagePreviewControl.prototype.fitToWindow = function () {
    this.updateViewport();
 };
 
-// 指定倍率に最も近い zoomIndex を返す
+// Return the zoomIndex nearest to the specified zoom level
 ImagePreviewControl.prototype.findNearestZoomIndex = function (zoom) {
    var bestIdx = 0;
    var bestDiff = Math.abs(this.zoomLevels[0] - zoom);
@@ -724,7 +724,7 @@ ImagePreviewControl.prototype.findNearestZoomIndex = function (zoom) {
    return bestIdx;
 };
 
-// ビューポート中央を基準にズーム変更
+// Zoom centered on the viewport center
 ImagePreviewControl.prototype.zoomAroundCenter = function (newZoom) {
    var oldZoom = this.zoomLevel;
    if (Math.abs(oldZoom - newZoom) < 1e-9) return;
@@ -734,17 +734,17 @@ ImagePreviewControl.prototype.zoomAroundCenter = function (newZoom) {
    if (viewW <= 0) viewW = this.width;
    if (viewH <= 0) viewH = this.height;
 
-   // 現在の表示中央のコンテンツ座標
+   // Content coordinates of the current display center
    var centerX = this.scrollX + viewW / 2.0;
    var centerY = this.scrollY + viewH / 2.0;
 
-   // 新しいズームでの中央座標
+   // Center coordinates at the new zoom level
    var factor = newZoom / oldZoom;
    this.scrollX = Math.round(centerX * factor - viewW / 2.0);
    this.scrollY = Math.round(centerY * factor - viewH / 2.0);
 
    this.zoomLevel = newZoom;
-   this.updateViewport(); // クランプ + スクロールバー更新 + 再描画
+   this.updateViewport(); // Clamp + scrollbar update + repaint
 };
 
 ImagePreviewControl.prototype.zoom11 = function () {
@@ -781,7 +781,7 @@ ImagePreviewControl.prototype.zoomOut = function () {
 };
 
 //============================================================================
-// StarEditDialog: 星座標入力サブダイアログ
+// StarEditDialog: Star coordinate entry sub-dialog
 //============================================================================
 
 function StarEditDialog(parent, starIndex, starData) {
@@ -794,34 +794,34 @@ function StarEditDialog(parent, starIndex, starData) {
    this.windowTitle = "Reference Star #" + starIndex;
    this.minWidth = 440;
 
-   // --- ピクセル座標表示 ---
+   // --- Pixel coordinate display ---
    var pixelLabel = new Label(this);
    pixelLabel.text = "Pixel:  X = " + this.starData.px.toFixed(2)
                    + "    Y = " + this.starData.py.toFixed(2);
    pixelLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
 
-   // --- 天体名 + 検索 ---
+   // --- Object name + search ---
    var nameLabel = new Label(this);
-   nameLabel.text = "天体名:";
+   nameLabel.text = "Name:";
    nameLabel.textAlignment = TextAlign_Right | TextAlign_VertCenter;
    nameLabel.setFixedWidth(60);
 
    this.nameEdit = new Edit(this);
    this.nameEdit.text = this.starData.name || "";
-   this.nameEdit.toolTip = "天体名を入力して Search（例: Sirius, Vega, M42）";
+   this.nameEdit.toolTip = "Enter object name and Search (e.g., Sirius, Vega, M42)";
 
    this.searchButton = new PushButton(this);
    this.searchButton.text = "Search";
-   this.searchButton.toolTip = "CDS Sesame で天体名から座標を検索";
+   this.searchButton.toolTip = "Search coordinates by name via CDS Sesame";
    this.searchButton.onClick = function () {
       var name = self.nameEdit.text.trim();
       if (name.length === 0) {
-         var mb = new MessageBox("天体名を入力してください。",
+         var mb = new MessageBox("Please enter an object name.",
             TITLE, StdIcon_Warning, StdButton_Ok);
          mb.execute();
          return;
       }
-      console.writeln("Sesame 検索: " + name + " ...");
+      console.writeln("Sesame search: " + name + " ...");
       console.flush();
       var result = searchObjectCoordinates(name);
       if (result) {
@@ -830,7 +830,7 @@ function StarEditDialog(parent, starIndex, starData) {
          console.writeln("  → RA=" + result.ra.toFixed(4) + ", DEC=" + result.dec.toFixed(4));
       } else {
          var mb = new MessageBox(
-            "'" + name + "' が見つかりませんでした。\nRA/DEC を直接入力してください。",
+            "'" + name + "' not found.\nPlease enter RA/DEC manually.",
             TITLE, StdIcon_Warning, StdButton_Ok);
          mb.execute();
       }
@@ -849,7 +849,7 @@ function StarEditDialog(parent, starIndex, starData) {
    raLabel.setFixedWidth(60);
 
    this.raEdit = new Edit(this);
-   this.raEdit.toolTip = "HH MM SS.ss / HH:MM:SS.ss / 度数";
+   this.raEdit.toolTip = "HH MM SS.ss / HH:MM:SS.ss / degrees";
    if (this.starData.ra !== null && this.starData.ra !== undefined) {
       this.raEdit.text = raToHMS(this.starData.ra);
    }
@@ -870,7 +870,7 @@ function StarEditDialog(parent, starIndex, starData) {
    decLabel.setFixedWidth(60);
 
    this.decEdit = new Edit(this);
-   this.decEdit.toolTip = "+DD MM SS.s / +DD:MM:SS.s / 度数";
+   this.decEdit.toolTip = "+DD MM SS.s / +DD:MM:SS.s / degrees";
    if (this.starData.dec !== null && this.starData.dec !== undefined) {
       this.decEdit.text = decToDMS(this.starData.dec);
    }
@@ -889,24 +889,24 @@ function StarEditDialog(parent, starIndex, starData) {
    this.okButton.text = "OK";
    this.okButton.icon = this.scaledResource(":/icons/ok.png");
    this.okButton.onClick = function () {
-      // バリデーション
+      // Validation
       var ra = parseRAInput(self.raEdit.text);
       var dec = parseDECInput(self.decEdit.text);
 
       if (ra === null || dec === null) {
-         var mb = new MessageBox("RA と DEC を正しく入力してください。",
+         var mb = new MessageBox("Please enter valid RA and DEC values.",
             TITLE, StdIcon_Warning, StdButton_Ok);
          mb.execute();
          return;
       }
       if (ra < 0 || ra >= 360) {
-         var mb = new MessageBox("RA は 0〜360 度の範囲で入力してください。",
+         var mb = new MessageBox("RA must be in the range 0 to 360 degrees.",
             TITLE, StdIcon_Warning, StdButton_Ok);
          mb.execute();
          return;
       }
       if (dec < -90 || dec > 90) {
-         var mb = new MessageBox("DEC は -90〜+90 度の範囲で入力してください。",
+         var mb = new MessageBox("DEC must be in the range -90 to +90 degrees.",
             TITLE, StdIcon_Warning, StdButton_Ok);
          mb.execute();
          return;
@@ -949,7 +949,7 @@ function StarEditDialog(parent, starIndex, starData) {
 StarEditDialog.prototype = new Dialog;
 
 //============================================================================
-// ManualSolverDialog: メインダイアログ
+// ManualSolverDialog: Main dialog
 //============================================================================
 
 function ManualSolverDialog(targetWindow) {
@@ -960,21 +960,21 @@ function ManualSolverDialog(targetWindow) {
    this.targetWindow = targetWindow;
    this.image = targetWindow.mainView.image;
    this.starPairs = [];      // [{px, py, ra, dec, name}]
-   this.wcsResult = null;    // WCSFitter.solve() の結果
+   this.wcsResult = null;    // Result of WCSFitter.solve()
    this.stretchMode = "linked"; // "none" / "linked" / "unlinked"
 
    this.windowTitle = TITLE + " v" + VERSION;
    this.minWidth = 800;
    this.minHeight = 600;
 
-   // --- Bitmap 生成 ---
-   console.writeln("ストレッチ済み Bitmap を生成中...");
+   // --- Bitmap generation ---
+   console.writeln("Generating stretched bitmap...");
    console.flush();
    var bmpResult = createStretchedBitmap(this.image, MAX_BITMAP_EDGE, this.stretchMode);
    console.writeln("  Bitmap: " + bmpResult.width + " x " + bmpResult.height
       + " (scale=" + bmpResult.scale.toFixed(3) + ")");
 
-   // --- ツールバー ---
+   // --- Toolbar ---
    this.fitButton = new PushButton(this);
    this.fitButton.text = "Fit";
    this.fitButton.toolTip = "Fit to Window";
@@ -997,7 +997,7 @@ function ManualSolverDialog(targetWindow) {
    };
 
    this.zoomOutButton = new PushButton(this);
-   this.zoomOutButton.text = "\u2212"; // マイナス記号（U+2212）
+   this.zoomOutButton.text = "\u2212"; // Minus sign (U+2212)
    this.zoomOutButton.toolTip = "Zoom Out";
    this.zoomOutButton.onClick = function () {
       self.preview.zoomOut();
@@ -1009,7 +1009,7 @@ function ManualSolverDialog(targetWindow) {
 
    this.stretchNoneButton = new PushButton(this);
    this.stretchNoneButton.text = "None";
-   this.stretchNoneButton.toolTip = "ストレッチなし（リニア表示）";
+   this.stretchNoneButton.toolTip = "No stretch (linear)";
    this.stretchNoneButton.onClick = function () {
       if (self.stretchMode !== "none") {
          self.stretchMode = "none";
@@ -1019,8 +1019,8 @@ function ManualSolverDialog(targetWindow) {
    };
 
    this.stretchLinkedButton = new PushButton(this);
-   this.stretchLinkedButton.text = "\u25B6Linked";  // デフォルト: アクティブ
-   this.stretchLinkedButton.toolTip = "全チャンネル同一ストレッチ";
+   this.stretchLinkedButton.text = "\u25B6Linked";  // Default: active
+   this.stretchLinkedButton.toolTip = "Same stretch for all channels";
    this.stretchLinkedButton.onClick = function () {
       if (self.stretchMode !== "linked") {
          self.stretchMode = "linked";
@@ -1031,7 +1031,7 @@ function ManualSolverDialog(targetWindow) {
 
    this.stretchUnlinkedButton = new PushButton(this);
    this.stretchUnlinkedButton.text = "Unlinked";
-   this.stretchUnlinkedButton.toolTip = "チャンネル独立ストレッチ";
+   this.stretchUnlinkedButton.toolTip = "Independent stretch per channel";
    this.stretchUnlinkedButton.onClick = function () {
       if (self.stretchMode !== "unlinked") {
          self.stretchMode = "unlinked";
@@ -1062,7 +1062,7 @@ function ManualSolverDialog(targetWindow) {
       self.onImageClicked(imgX, imgY);
    };
 
-   // --- 星テーブル（TreeBox） ---
+   // --- Star table (TreeBox) ---
    var starTableLabel = new Label(this);
    starTableLabel.text = "Reference Stars (minimum 4):";
 
@@ -1085,7 +1085,7 @@ function ManualSolverDialog(targetWindow) {
    this.starTreeBox.setColumnWidth(5, 80);
    this.starTreeBox.setMinHeight(120);
 
-   // TreeBox 選択変更 → マーカーハイライト
+   // TreeBox selection change -> highlight marker
    this.starTreeBox.onCurrentNodeUpdated = function (node) {
       if (node) {
          self.preview.selectedIndex = self.starTreeBox.childIndex(node);
@@ -1095,7 +1095,7 @@ function ManualSolverDialog(targetWindow) {
       self.preview.viewport.update();
    };
 
-   // TreeBox ダブルクリック → 編集
+   // TreeBox double-click -> edit
    this.starTreeBox.onNodeDoubleClicked = function (node, col) {
       var idx = self.starTreeBox.childIndex(node);
       if (idx >= 0 && idx < self.starPairs.length) {
@@ -1103,10 +1103,10 @@ function ManualSolverDialog(targetWindow) {
       }
    };
 
-   // --- 星テーブルのボタン ---
+   // --- Star table buttons ---
    this.editStarButton = new PushButton(this);
    this.editStarButton.text = "Edit...";
-   this.editStarButton.toolTip = "選択した星を編集";
+   this.editStarButton.toolTip = "Edit selected star";
    this.editStarButton.onClick = function () {
       var node = self.starTreeBox.currentNode;
       if (!node) return;
@@ -1118,7 +1118,7 @@ function ManualSolverDialog(targetWindow) {
 
    this.removeStarButton = new PushButton(this);
    this.removeStarButton.text = "Remove";
-   this.removeStarButton.toolTip = "選択した星を削除";
+   this.removeStarButton.toolTip = "Remove selected star";
    this.removeStarButton.onClick = function () {
       var node = self.starTreeBox.currentNode;
       if (!node) return;
@@ -1132,10 +1132,10 @@ function ManualSolverDialog(targetWindow) {
 
    this.clearStarsButton = new PushButton(this);
    this.clearStarsButton.text = "Clear All";
-   this.clearStarsButton.toolTip = "全ての星を削除";
+   this.clearStarsButton.toolTip = "Remove all stars";
    this.clearStarsButton.onClick = function () {
       if (self.starPairs.length === 0) return;
-      var mb = new MessageBox("全ての星を削除しますか？",
+      var mb = new MessageBox("Remove all stars?",
          TITLE, StdIcon_Question, StdButton_Yes, StdButton_No);
       if (mb.execute() === StdButton_Yes) {
          self.starPairs = [];
@@ -1146,14 +1146,14 @@ function ManualSolverDialog(targetWindow) {
 
    this.exportButton = new PushButton(this);
    this.exportButton.text = "Export...";
-   this.exportButton.toolTip = "星ペアデータを JSON ファイルに書き出し";
+   this.exportButton.toolTip = "Export star pair data to JSON file";
    this.exportButton.onClick = function () {
       self.doExport();
    };
 
    this.importButton = new PushButton(this);
    this.importButton.text = "Import...";
-   this.importButton.toolTip = "JSON ファイルから星ペアデータを読み込み";
+   this.importButton.toolTip = "Import star pair data from JSON file";
    this.importButton.onClick = function () {
       self.doImport();
    };
@@ -1168,16 +1168,16 @@ function ManualSolverDialog(targetWindow) {
    starButtonSizer.add(this.importButton);
    starButtonSizer.addStretch();
 
-   // --- ステータスラベル ---
+   // --- Status label ---
    this.statusLabel = new Label(this);
-   this.statusLabel.text = "星を画像上でクリックして登録してください。";
+   this.statusLabel.text = "Click on stars in the image to register them.";
    this.statusLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
 
-   // --- メインボタン ---
+   // --- Main buttons ---
    this.solveButton = new PushButton(this);
    this.solveButton.text = "Solve";
    this.solveButton.icon = this.scaledResource(":/icons/ok.png");
-   this.solveButton.toolTip = "WCS フィッティングを実行（4星以上必要）";
+   this.solveButton.toolTip = "Run WCS fitting (requires 4+ stars)";
    this.solveButton.onClick = function () {
       self.doSolve();
    };
@@ -1185,7 +1185,7 @@ function ManualSolverDialog(targetWindow) {
    this.applyButton = new PushButton(this);
    this.applyButton.text = "Apply to Image";
    this.applyButton.icon = this.scaledResource(":/icons/execute.png");
-   this.applyButton.toolTip = "WCS を画像に適用";
+   this.applyButton.toolTip = "Apply WCS to image";
    this.applyButton.enabled = false;
    this.applyButton.onClick = function () {
       self.doApply();
@@ -1205,7 +1205,7 @@ function ManualSolverDialog(targetWindow) {
    mainButtonSizer.add(this.applyButton);
    mainButtonSizer.add(this.closeButton);
 
-   // --- 全体レイアウト ---
+   // --- Overall layout ---
    this.sizer = new VerticalSizer;
    this.sizer.margin = 8;
    this.sizer.spacing = 6;
@@ -1220,7 +1220,7 @@ function ManualSolverDialog(targetWindow) {
 
    this.resize(900, 700);
 
-   // 初期表示: fit to window（遅延実行）
+   // Initial display: fit to window (deferred execution)
    this.onShow = function () {
       self.preview.fitToWindow();
    };
@@ -1229,16 +1229,16 @@ function ManualSolverDialog(targetWindow) {
 ManualSolverDialog.prototype = new Dialog;
 
 //----------------------------------------------------------------------------
-// 画像クリック処理
+// Image click handler
 //----------------------------------------------------------------------------
 
 ManualSolverDialog.prototype.onImageClicked = function (imgX, imgY) {
-   // セントロイド計算
+   // Centroid computation
    var centroid = computeCentroid(this.image, imgX, imgY, 10);
    var cx = centroid ? centroid.x : imgX;
    var cy = centroid ? centroid.y : imgY;
 
-   // 画像範囲外チェック
+   // Out-of-bounds check
    if (cx < 0 || cx >= this.image.width || cy < 0 || cy >= this.image.height) return;
 
    var starIndex = this.starPairs.length + 1;
@@ -1253,7 +1253,7 @@ ManualSolverDialog.prototype.onImageClicked = function (imgX, imgY) {
 };
 
 //----------------------------------------------------------------------------
-// 星の編集
+// Edit star
 //----------------------------------------------------------------------------
 
 ManualSolverDialog.prototype.editStar = function (index) {
@@ -1269,11 +1269,11 @@ ManualSolverDialog.prototype.editStar = function (index) {
 };
 
 //----------------------------------------------------------------------------
-// UI 更新
+// UI update
 //----------------------------------------------------------------------------
 
 ManualSolverDialog.prototype.refreshAll = function () {
-   // TreeBox 更新
+   // Update TreeBox
    this.starTreeBox.clear();
    for (var i = 0; i < this.starPairs.length; i++) {
       var s = this.starPairs[i];
@@ -1285,7 +1285,7 @@ ManualSolverDialog.prototype.refreshAll = function () {
       node.setText(3, s.name || "");
       node.setText(4, raToHMS(s.ra) + " / " + decToDMS(s.dec));
 
-      // 残差
+      // Residual
       if (this.wcsResult && this.wcsResult.residuals && this.wcsResult.residuals[i]) {
          node.setText(5, this.wcsResult.residuals[i].residual_arcsec.toFixed(2) + "\"");
       } else {
@@ -1293,7 +1293,7 @@ ManualSolverDialog.prototype.refreshAll = function () {
       }
    }
 
-   // マーカー更新
+   // Update markers
    this.preview.starMarkers = [];
    for (var i = 0; i < this.starPairs.length; i++) {
       this.preview.starMarkers.push({
@@ -1304,7 +1304,7 @@ ManualSolverDialog.prototype.refreshAll = function () {
    }
    this.preview.viewport.update();
 
-   // ステータス更新
+   // Update status
    var nStars = this.starPairs.length;
    var statusText = nStars + " star" + (nStars !== 1 ? "s" : "") + " registered";
    if (this.wcsResult && this.wcsResult.success) {
@@ -1313,12 +1313,12 @@ ManualSolverDialog.prototype.refreshAll = function () {
    }
    this.statusLabel.text = statusText;
 
-   // ボタン状態
+   // Button state
    this.applyButton.enabled = (this.wcsResult !== null && this.wcsResult.success);
 };
 
 //----------------------------------------------------------------------------
-// Bitmap 再生成（ストレッチモード変更時）
+// Rebuild bitmap (on stretch mode change)
 //----------------------------------------------------------------------------
 
 ManualSolverDialog.prototype.updateStretchButtons = function () {
@@ -1330,11 +1330,11 @@ ManualSolverDialog.prototype.updateStretchButtons = function () {
 ManualSolverDialog.prototype.rebuildBitmap = function () {
    this.cursor = new Cursor(StdCursor_Wait);
    processEvents();
-   console.writeln("Bitmap を再生成中（" + this.stretchMode + "）...");
+   console.writeln("Rebuilding bitmap (" + this.stretchMode + ")...");
    console.flush();
    var bmpResult = createStretchedBitmap(this.image, MAX_BITMAP_EDGE, this.stretchMode);
    this.preview.setBitmap(bmpResult);
-   console.writeln("  完了。");
+   console.writeln("  Done.");
    this.cursor = new Cursor(StdCursor_Arrow);
 };
 
@@ -1345,7 +1345,7 @@ ManualSolverDialog.prototype.rebuildBitmap = function () {
 ManualSolverDialog.prototype.doSolve = function () {
    if (this.starPairs.length < 4) {
       var mb = new MessageBox(
-         "最低4つの星ペアが必要です（現在: " + this.starPairs.length + "）。",
+         "At least 4 star pairs required (current: " + this.starPairs.length + ").",
          TITLE, StdIcon_Warning, StdButton_Ok);
       mb.execute();
       return;
@@ -1355,7 +1355,7 @@ ManualSolverDialog.prototype.doSolve = function () {
    this.wcsResult = fitter.solve();
 
    if (!this.wcsResult.success) {
-      var mb = new MessageBox("WCS フィットに失敗しました:\n" + this.wcsResult.message,
+      var mb = new MessageBox("WCS fitting failed:\n" + this.wcsResult.message,
          TITLE, StdIcon_Error, StdButton_Ok);
       mb.execute();
       this.refreshAll();
@@ -1363,7 +1363,7 @@ ManualSolverDialog.prototype.doSolve = function () {
    }
 
    console.writeln("");
-   console.writeln("<b>WCS フィット結果:</b>");
+   console.writeln("<b>WCS Fitting Result:</b>");
    console.writeln("  RMS: " + this.wcsResult.rms_arcsec.toFixed(3) + " arcsec");
    console.writeln("  Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px");
    console.writeln("  Stars: " + this.starPairs.length);
@@ -1379,11 +1379,11 @@ ManualSolverDialog.prototype.doApply = function () {
    if (!this.wcsResult || !this.wcsResult.success) return;
 
    console.writeln("");
-   console.writeln("<b>WCS を画像に適用中...</b>");
+   console.writeln("<b>Applying WCS to image...</b>");
 
    applyWCSToImage(this.targetWindow, this.wcsResult, this.image.width, this.image.height);
 
-   // コンソール表示
+   // Console output
    var wcsObj = {
       crval1: this.wcsResult.crval1, crval2: this.wcsResult.crval2,
       crpix1: this.wcsResult.crpix1, crpix2: this.wcsResult.crpix2,
@@ -1395,13 +1395,13 @@ ManualSolverDialog.prototype.doApply = function () {
    displayImageCoordinates(wcsObj, this.image.width, this.image.height);
 
    console.writeln("");
-   console.writeln("<b>WCS を正常に適用しました。</b>");
+   console.writeln("<b>WCS applied successfully.</b>");
 
-   // Apply 成功時にセッション保存
+   // Save session on successful Apply
    this.saveSessionData();
 
    var mb = new MessageBox(
-      "WCS を正常に適用しました。\n\n"
+      "WCS applied successfully.\n\n"
       + "RMS: " + this.wcsResult.rms_arcsec.toFixed(3) + " arcsec\n"
       + "Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px\n"
       + "Stars: " + this.starPairs.length,
@@ -1410,12 +1410,12 @@ ManualSolverDialog.prototype.doApply = function () {
 };
 
 //============================================================================
-// セッション保存/復元
+// Session save/restore
 //============================================================================
 
 #define SETTINGS_KEY "ManualImageSolver/sessionData"
 
-// セッションデータを Settings に保存
+// Save session data to Settings
 function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs) {
    var data = {
       imageId: imageId,
@@ -1435,8 +1435,8 @@ function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs) {
    Settings.write(SETTINGS_KEY, DataType_String, JSON.stringify(data));
 }
 
-// Settings からセッションデータを読み込み
-// 成功時: パース済みオブジェクト、失敗時: null
+// Load session data from Settings
+// On success: parsed object, on failure: null
 function loadSession() {
    var raw = Settings.read(SETTINGS_KEY, DataType_String);
    if (!raw || raw.length === 0) return null;
@@ -1450,7 +1450,7 @@ function loadSession() {
 }
 
 //----------------------------------------------------------------------------
-// ダイアログ Close 時にセッション保存
+// Save session on dialog close
 //----------------------------------------------------------------------------
 
 ManualSolverDialog.prototype.saveSessionData = function () {
@@ -1462,24 +1462,24 @@ ManualSolverDialog.prototype.saveSessionData = function () {
          this.stretchMode,
          this.starPairs
       );
-      console.writeln("セッションデータを保存しました（星 " + this.starPairs.length + " 個）。");
+      console.writeln("Session data saved (" + this.starPairs.length + " stars).");
    }
 };
 
 //----------------------------------------------------------------------------
-// Export: 星ペアデータを JSON ファイルに書き出し
+// Export: Write star pair data to JSON file
 //----------------------------------------------------------------------------
 
 ManualSolverDialog.prototype.doExport = function () {
    if (this.starPairs.length === 0) {
-      var mb = new MessageBox("エクスポートする星ペアがありません。",
+      var mb = new MessageBox("No star pairs to export.",
          TITLE, StdIcon_Warning, StdButton_Ok);
       mb.execute();
       return;
    }
 
    var sfd = new SaveFileDialog;
-   sfd.caption = "星ペアデータをエクスポート";
+   sfd.caption = "Export Star Pair Data";
    sfd.filters = [["JSON files", "*.json"]];
    sfd.selectedFileExtension = ".json";
 
@@ -1507,24 +1507,24 @@ ManualSolverDialog.prototype.doExport = function () {
       f.createForWriting(sfd.fileName);
       f.write(ByteArray.stringToUTF8(json));
       f.close();
-      console.writeln("星ペアデータをエクスポートしました: " + sfd.fileName);
-      var mb = new MessageBox("星ペアデータをエクスポートしました（" + this.starPairs.length + " 個）。",
+      console.writeln("Star pair data exported: " + sfd.fileName);
+      var mb = new MessageBox("Star pair data exported (" + this.starPairs.length + " stars).",
          TITLE, StdIcon_Information, StdButton_Ok);
       mb.execute();
    } catch (e) {
-      var mb = new MessageBox("ファイルの書き込みに失敗しました:\n" + e.message,
+      var mb = new MessageBox("Failed to write file:\n" + e.message,
          TITLE, StdIcon_Error, StdButton_Ok);
       mb.execute();
    }
 };
 
 //----------------------------------------------------------------------------
-// Import: JSON ファイルから星ペアデータを読み込み
+// Import: Read star pair data from JSON file
 //----------------------------------------------------------------------------
 
 ManualSolverDialog.prototype.doImport = function () {
    var ofd = new OpenFileDialog;
-   ofd.caption = "星ペアデータをインポート";
+   ofd.caption = "Import Star Pair Data";
    ofd.filters = [["JSON files", "*.json"]];
 
    if (!ofd.execute()) return;
@@ -1537,44 +1537,43 @@ ManualSolverDialog.prototype.doImport = function () {
       var json = buf.utf8ToString();
       var data = JSON.parse(json);
    } catch (e) {
-      var mb = new MessageBox("ファイルの読み込みに失敗しました:\n" + e.message,
+      var mb = new MessageBox("Failed to read file:\n" + e.message,
          TITLE, StdIcon_Error, StdButton_Ok);
       mb.execute();
       return;
    }
 
    if (!data || !data.starPairs || data.starPairs.length === 0) {
-      var mb = new MessageBox("有効な星ペアデータが含まれていません。",
+      var mb = new MessageBox("No valid star pair data found.",
          TITLE, StdIcon_Warning, StdButton_Ok);
       mb.execute();
       return;
    }
 
-   // 画像サイズチェック
+   // Image size check
    if (data.imageWidth && data.imageHeight) {
       if (data.imageWidth !== this.image.width || data.imageHeight !== this.image.height) {
          var mb = new MessageBox(
-            "画像サイズが一致しません。\n"
-            + "ファイル: " + data.imageWidth + " x " + data.imageHeight + "\n"
-            + "現在の画像: " + this.image.width + " x " + this.image.height + "\n\n"
-            + "それでもインポートしますか？",
+            "Image size mismatch.\n"
+            + "File: " + data.imageWidth + " x " + data.imageHeight + "\n"
+            + "Current image: " + this.image.width + " x " + this.image.height + "\n\n"
+            + "Import anyway?",
             TITLE, StdIcon_Warning, StdButton_Yes, StdButton_No);
          if (mb.execute() !== StdButton_Yes) return;
       }
    }
 
-   // 既存の星ペアがある場合の確認
+   // Confirm if existing star pairs are present
    if (this.starPairs.length > 0) {
       var mb = new MessageBox(
-         "現在の星ペア（" + this.starPairs.length + " 個）を置き換えますか？\n"
-         + "「No」を選ぶと追加されます。",
+         "Replace current star pairs (" + this.starPairs.length + ")?\nSelect 'No' to append instead.",
          TITLE, StdIcon_Question, StdButton_Yes, StdButton_No);
       if (mb.execute() === StdButton_Yes) {
          this.starPairs = [];
       }
    }
 
-   // 星ペアを追加
+   // Add star pairs
    for (var i = 0; i < data.starPairs.length; i++) {
       var s = data.starPairs[i];
       if (typeof s.px === "number" && typeof s.py === "number"
@@ -1587,7 +1586,7 @@ ManualSolverDialog.prototype.doImport = function () {
       }
    }
 
-   // ストレッチモード復元
+   // Restore stretch mode
    if (data.stretchMode && data.stretchMode !== this.stretchMode) {
       var modes = ["none", "linked", "unlinked"];
       if (modes.indexOf(data.stretchMode) >= 0) {
@@ -1600,18 +1599,18 @@ ManualSolverDialog.prototype.doImport = function () {
    this.wcsResult = null;
    this.refreshAll();
 
-   console.writeln("星ペアデータをインポートしました: " + ofd.fileName
-      + "（" + data.starPairs.length + " 個）");
+   console.writeln("Star pair data imported: " + ofd.fileName
+      + " (" + data.starPairs.length + " stars)");
 };
 
 //============================================================================
-// メイン実行
+// Main execution
 //============================================================================
 
 function main() {
    if (ImageWindow.activeWindow.isNull) {
       var mb = new MessageBox(
-         "画像が開かれていません。\n先に画像を開いてからスクリプトを実行してください。",
+         "No image is open.\nPlease open an image before running this script.",
          TITLE, StdIcon_Error, StdButton_Ok);
       mb.execute();
       return;
@@ -1625,28 +1624,28 @@ function main() {
    console.writeln("Image: " + targetWindow.mainView.id
       + " (" + image.width + " x " + image.height + " px)");
 
-   // セッション復元チェック
+   // Check for session restore
    var restoredStarPairs = null;
    var restoredStretchMode = null;
    var sessionData = loadSession();
    if (sessionData
        && sessionData.imageWidth === image.width
        && sessionData.imageHeight === image.height) {
-      var msg = "前回のセッションデータが見つかりました。\n\n"
-         + "画像: " + (sessionData.imageId || "(不明)") + "\n"
-         + "星ペア: " + sessionData.starPairs.length + " 個\n\n"
-         + "復元しますか？";
+      var msg = "Previous session data found.\n\n"
+         + "Image: " + (sessionData.imageId || "(unknown)") + "\n"
+         + "Star pairs: " + sessionData.starPairs.length + "\n\n"
+         + "Restore?";
       var mb = new MessageBox(msg, TITLE, StdIcon_Question, StdButton_Yes, StdButton_No);
       if (mb.execute() === StdButton_Yes) {
          restoredStarPairs = sessionData.starPairs;
          restoredStretchMode = sessionData.stretchMode || "linked";
-         console.writeln("セッションを復元します（星 " + restoredStarPairs.length + " 個）。");
+         console.writeln("Restoring session (" + restoredStarPairs.length + " stars).");
       }
    }
 
    var dlg = new ManualSolverDialog(targetWindow);
 
-   // セッション復元: 星ペアとストレッチモードを適用
+   // Session restore: apply star pairs and stretch mode
    if (restoredStarPairs) {
       dlg.starPairs = restoredStarPairs;
       if (restoredStretchMode && restoredStretchMode !== dlg.stretchMode) {
@@ -1659,11 +1658,11 @@ function main() {
 
    dlg.execute();
 
-   // ダイアログ Close 時にセッション保存
+   // Save session on dialog close
    dlg.saveSessionData();
 
    console.writeln("");
-   console.writeln(TITLE + " を終了しました。");
+   console.writeln(TITLE + " finished.");
 }
 
 main();
