@@ -6,7 +6,7 @@
    </description>
    <platform os="all" arch="noarch">
       <package fileName="ManualImageSolver-1.1.0.zip"
-               sha1="b0344b61d919873f8b254ec2db7c2690fbd6e26b"
+               sha1="479dfb84d688519244d01e87861fb9e5dbfc092f"
                type="script"
                releaseDate="20260304">
          <title>Manual Image Solver</title>

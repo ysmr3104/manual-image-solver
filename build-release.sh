@@ -31,6 +31,7 @@ mkdir -p "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}"
 cp "${SCRIPT_DIR}/javascript/ManualImageSolver.js" "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"
 cp "${SCRIPT_DIR}/javascript/wcs_math.js"           "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"
 cp "${SCRIPT_DIR}/javascript/WCSApplier.js"          "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"
+cp "${SCRIPT_DIR}/javascript/wcs_keywords.js"        "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"
 
 echo "ファイルをコピーしました:"
 ls -la "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"

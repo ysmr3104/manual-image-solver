@@ -8,7 +8,7 @@
 // Manual Image Solver: Manually identify stars in a native PJSR Dialog,
 // compute a TAN-projection WCS, and apply it to the active image.
 //
-// Copyright (c) 2024-2026 Manual Image Solver Project
+// Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
 #define VERSION "1.1.0"
@@ -24,53 +24,12 @@
 #include <pjsr/Color.jsh>
 
 #include "wcs_math.js"
+#include "wcs_keywords.js"
 
 #define TITLE "Manual Image Solver"
 
 // Maximum bitmap edge size (memory optimization)
 #define MAX_BITMAP_EDGE 2048
-
-//============================================================================
-// Utility functions
-//============================================================================
-
-// Check if a FITS keyword name is WCS-related
-function isWCSKeyword(name) {
-   var wcsNames = [
-      "CRVAL1", "CRVAL2", "CRPIX1", "CRPIX2",
-      "CD1_1", "CD1_2", "CD2_1", "CD2_2",
-      "CDELT1", "CDELT2", "CROTA1", "CROTA2",
-      "CTYPE1", "CTYPE2", "CUNIT1", "CUNIT2",
-      "RADESYS", "EQUINOX",
-      "A_ORDER", "B_ORDER", "AP_ORDER", "BP_ORDER",
-      "PLTSOLVD",
-      "OBJCTRA", "OBJCTDEC"
-   ];
-   for (var i = 0; i < wcsNames.length; i++) {
-      if (name === wcsNames[i]) return true;
-   }
-   if (/^[AB]P?_\d+_\d+$/.test(name)) return true;
-   return false;
-}
-
-// Determine FITSKeyword type from value and create the appropriate FITSKeyword object
-function makeFITSKeyword(name, value) {
-   var strVal = value.toString();
-   if (strVal === "T" || strVal === "true") {
-      return new FITSKeyword(name, "T", "");
-   }
-   if (strVal === "F" || strVal === "false") {
-      return new FITSKeyword(name, "F", "");
-   }
-   var stringKeys = ["CTYPE1", "CTYPE2", "CUNIT1", "CUNIT2", "RADESYS", "PLTSOLVD",
-      "OBJCTRA", "OBJCTDEC"];
-   for (var i = 0; i < stringKeys.length; i++) {
-      if (name === stringKeys[i]) {
-         return new FITSKeyword(name, "'" + strVal + "'", "");
-      }
-   }
-   return new FITSKeyword(name, strVal, "");
-}
 
 //============================================================================
 // Coordinate formatting and display functions
@@ -265,7 +224,7 @@ function searchObjectCoordinates(objectName) {
    var tmpFile = File.systemTempDirectory + "/sesame_query.txt";
 
    var P = new ExternalProcess;
-   P.start("/usr/bin/curl", ["-s", "-o", tmpFile, "-m", "10", url]);
+   P.start("curl", ["-s", "-o", tmpFile, "-m", "10", url]);
    if (!P.waitForFinished(15000)) {
       P.kill();
       return null;

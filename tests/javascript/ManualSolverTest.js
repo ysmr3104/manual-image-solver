@@ -11,36 +11,7 @@
 #include <pjsr/StdIcon.jsh>
 #include <pjsr/StdButton.jsh>
 
-// ManualImageSolver.js の関数を再定義（統合テスト用）
-// 本来は #include で取り込むが、テスト用に必要な関数のみ再定義
-
-function isWCSKeyword(name) {
-   var wcsNames = [
-      "CRVAL1", "CRVAL2", "CRPIX1", "CRPIX2",
-      "CD1_1", "CD1_2", "CD2_1", "CD2_2",
-      "CDELT1", "CDELT2", "CROTA1", "CROTA2",
-      "CTYPE1", "CTYPE2", "CUNIT1", "CUNIT2",
-      "RADESYS", "EQUINOX",
-      "A_ORDER", "B_ORDER", "AP_ORDER", "BP_ORDER",
-      "PLTSOLVD"
-   ];
-   for (var i = 0; i < wcsNames.length; i++) {
-      if (name === wcsNames[i]) return true;
-   }
-   if (/^[AB]P?_\d+_\d+$/.test(name)) return true;
-   return false;
-}
-
-function makeFITSKeyword(name, value) {
-   var strVal = value.toString();
-   if (strVal === "T" || strVal === "true") return new FITSKeyword(name, "T", "");
-   if (strVal === "F" || strVal === "false") return new FITSKeyword(name, "F", "");
-   var stringKeys = ["CTYPE1", "CTYPE2", "CUNIT1", "CUNIT2", "RADESYS", "PLTSOLVD"];
-   for (var i = 0; i < stringKeys.length; i++) {
-      if (name === stringKeys[i]) return new FITSKeyword(name, "'" + strVal + "'", "");
-   }
-   return new FITSKeyword(name, strVal, "");
-}
+#include "../../javascript/wcs_keywords.js"
 
 function applyWCS(window, wcsResult) {
    var existingKw = window.keywords;
@@ -100,7 +71,7 @@ function searchObjectCoordinates(objectName) {
    var url = "http://cdsweb.u-strasbg.fr/cgi-bin/nph-sesame/-oI/A?" + encoded;
    var tmpFile = File.systemTempDirectory + "/sesame_query.txt";
    var P = new ExternalProcess;
-   P.start("/usr/bin/curl", ["-s", "-o", tmpFile, "-m", "10", url]);
+   P.start("curl", ["-s", "-o", tmpFile, "-m", "10", url]);
    if (!P.waitForFinished(15000)) { P.kill(); return null; }
    if (P.exitCode !== 0) return null;
    if (!File.exists(tmpFile)) return null;

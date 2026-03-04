@@ -40,6 +40,7 @@ node tests/javascript/test_parse_coords.js
 ### PJSR ネイティブ構成（JavaScript のみ）
 
 - **`javascript/wcs_math.js`**: WCS 数学ライブラリ。`#include` で ManualImageSolver.js に取り込み。**PJSR と Node.js の両方**で動作する純粋 JavaScript。`var` 宣言・ES5 スタイルが必須（PJSR は `let`/`const`/アロー関数を未サポート）。
+- **`javascript/wcs_keywords.js`**: FITS WCS キーワードユーティリティ（`isWCSKeyword`, `makeFITSKeyword`）。ManualImageSolver.js と WCSApplier.js の両方から `#include` で共有。PJSR 専用。
 - **`javascript/ManualImageSolver.js`**: メインスクリプト。全 UI を PJSR Dialog で構築。
   - `ImagePreviewControl` (ScrollBox): スクロール状態を手動管理（scrollX/scrollY）、ズーム/パン/クリック
   - `StarEditDialog` (Dialog): 天体名入力 + Sesame 検索 + RA/DEC 入力

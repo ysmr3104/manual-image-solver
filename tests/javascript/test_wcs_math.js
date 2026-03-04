@@ -213,7 +213,7 @@ test("WCSFitter: 既知WCSからの合成4星（最小構成）で残差 < 1 arc
    var starPairs = [];
    for (var i = 0; i < testPixels.length; i++) {
       var u = (testPixels[i].px + 1.0) - crpix1;
-      var v = (testPixels[i].py + 1.0) - crpix2;
+      var v = (imgH - testPixels[i].py) - crpix2;
       var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
       var eta = knownCd[1][0] * u + knownCd[1][1] * v;
       var coord = tanDeproject(knownCrval, [xi, eta]);
@@ -257,7 +257,7 @@ test("WCSFitter: 既知WCSからの合成6星で残差 < 0.01 arcsec", function 
    var starPairs = [];
    for (var i = 0; i < testPixels.length; i++) {
       var u = (testPixels[i].px + 1.0) - crpix1;
-      var v = (testPixels[i].py + 1.0) - crpix2;
+      var v = (imgH - testPixels[i].py) - crpix2;
       var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
       var eta = knownCd[1][0] * u + knownCd[1][1] * v;
       var coord = tanDeproject(knownCrval, [xi, eta]);
@@ -304,7 +304,7 @@ test("WCSFitter: 合成10星で高精度フィット", function () {
    var starPairs = [];
    for (var i = 0; i < testPixels.length; i++) {
       var u = (testPixels[i].px + 1.0) - crpix1;
-      var v = (testPixels[i].py + 1.0) - crpix2;
+      var v = (imgH - testPixels[i].py) - crpix2;
       var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
       var eta = knownCd[1][0] * u + knownCd[1][1] * v;
       var coord = tanDeproject(knownCrval, [xi, eta]);
@@ -353,7 +353,7 @@ test("WCSFitter: CRVAL 初期値が 5度ずれても収束", function () {
    var starPairs = [];
    for (var i = 0; i < testPixels.length; i++) {
       var u = (testPixels[i].px + 1.0) - crpix1;
-      var v = (testPixels[i].py + 1.0) - crpix2;
+      var v = (imgH - testPixels[i].py) - crpix2;
       var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
       var eta = knownCd[1][0] * u + knownCd[1][1] * v;
       var coord = tanDeproject(knownCrval, [xi, eta]);
@@ -402,7 +402,7 @@ test("WCSFitter: 回転した CD 行列のフィット", function () {
    var starPairs = [];
    for (var i = 0; i < testPixels.length; i++) {
       var u = (testPixels[i].px + 1.0) - crpix1;
-      var v = (testPixels[i].py + 1.0) - crpix2;
+      var v = (imgH - testPixels[i].py) - crpix2;
       var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
       var eta = knownCd[1][0] * u + knownCd[1][1] * v;
       var coord = tanDeproject(knownCrval, [xi, eta]);
@@ -448,7 +448,7 @@ test("WCSFitter: ピクセルスケールの検証", function () {
    var starPairs = [];
    for (var i = 0; i < testPixels.length; i++) {
       var u = (testPixels[i].px + 1.0) - crpix1;
-      var v = (testPixels[i].py + 1.0) - crpix2;
+      var v = (imgH - testPixels[i].py) - crpix2;
       var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
       var eta = knownCd[1][0] * u + knownCd[1][1] * v;
       var coord = tanDeproject(knownCrval, [xi, eta]);
