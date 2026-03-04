@@ -116,4 +116,4 @@ JSON ファイルから WCS を手動適用する場合:
 
 ## ライセンス
 
-Copyright (c) 2024-2026 Manual Image Solver Project
+本プロジェクトは [MIT License](LICENSE) のもとで公開されています。

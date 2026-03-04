@@ -116,4 +116,4 @@ See [docs/specs.md](docs/specs.md) for the full technical specification.
 
 ## License
 
-Copyright (c) 2024-2026 Manual Image Solver Project
+This project is licensed under the [MIT License](LICENSE).
