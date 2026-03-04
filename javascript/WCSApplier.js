@@ -1,16 +1,15 @@
 #feature-id    WCSApplier : Utilities > WCSApplier
-#feature-info  Apply WCS from JSON file exported by ManualImageSolver Python GUI.
+#feature-info  Apply WCS from a JSON file to the active image.
 
 //----------------------------------------------------------------------------
 // WCSApplier.js - PixInsight JavaScript Runtime (PJSR) Script
 //
-// ManualImageSolver Python GUI が出力した WCS JSON ファイルを読み込み、
-// アクティブ画像に WCS キーワードを適用する。
+// Read a WCS JSON file and apply WCS keywords to the active image.
 //
-// Copyright (c) 2024-2025 Split Image Solver Project
+// Copyright (c) 2024-2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.0.0"
+#define VERSION "1.1.0"
 
 #include <pjsr/StdIcon.jsh>
 #include <pjsr/StdButton.jsh>
