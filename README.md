@@ -1,159 +1,119 @@
+[日本語](README.ja.md)
+
 # Manual Image Solver v1.1.0
 
-手動プレートソルブツール。画像上の星をユーザーが手動で同定し、TAN（gnomonic）投影の WCS（World Coordinate System）を算出して画像に適用します。
+A manual plate solving tool for PixInsight. Manually identify stars on an image to compute and apply a TAN (gnomonic) projection WCS (World Coordinate System).
 
-## 概要
+## Overview
 
-astrometry.net や PixInsight の ImageSolver による自動プレートソルブが失敗する画像に対し、手動で星を同定して WCS を取得するためのツールです。
+When automatic plate solving with astrometry.net or PixInsight's ImageSolver fails, this tool lets you manually identify stars to obtain a WCS solution.
 
-**PixInsight 完結**: Python 等の外部依存なし。PixInsight の PJSR ネイティブ Dialog 内で、画像表示から星選択、WCS フィッティング、適用まで全ての操作が完結します。
+**Runs entirely within PixInsight**: No external dependencies like Python required. All operations — image display, star selection, WCS fitting, and application — are performed within a native PJSR Dialog.
 
-![メインダイアログ - 星登録済み](docs/images/03_stars_registered.jpg)
+![Main dialog with registered stars](docs/images/03_stars_registered.jpg)
 
-## 主な機能
+## Features
 
-- **直感的な操作**: クリックで星選択、ドラッグでパン（モード切替不要）
-- **ストレッチ切替**: None / Linked / Unlinked の 3 モードをワンクリックで切替
-- **19 段階ズーム**: マウスホイール（マウス位置中心）、Fit / 1:1 ボタン、+/- ボタン
-- **セッション復元**: 前回の星ペアデータを自動保存し、次回起動時に復元可能
-- **Export / Import**: 星ペアデータを JSON ファイルに書き出し・読み込み
-- **Sesame 検索**: 天体名から CDS Sesame データベースで RA/DEC を自動取得
-- **セントロイド計算**: クリック位置から輝度重心法で星の中心に自動スナップ
+- **Intuitive controls**: Click to select stars, drag to pan (no mode switching needed)
+- **Stretch modes**: Switch between None / Linked / Unlinked with one click
+- **19-level zoom**: Mouse wheel (centered on cursor), Fit / 1:1 buttons, +/- buttons
+- **Session restore**: Star pair data is auto-saved and can be restored on next launch
+- **Export / Import**: Save and load star pair data as JSON files
+- **Sesame search**: Auto-resolve RA/DEC from object names via the CDS Sesame database
+- **Centroid calculation**: Auto-snap to star centers using intensity-weighted centroid
 
-## インストール
+## Installation
 
-### リポジトリからインストール（推奨）
+### From Repository (Recommended)
 
-1. PixInsight のメニューから **Resources > Updates > Manage Repositories** を開く
-2. **Add** をクリックし、以下の URL を入力:
+1. In PixInsight, go to **Resources > Updates > Manage Repositories**
+2. Click **Add** and enter the following URL:
    ```
    https://raw.githubusercontent.com/ysmr3104/manual-image-solver/main/repository/
    ```
-3. **OK** で閉じ、**Resources > Updates > Check for Updates** を実行
-4. PixInsight を再起動
+3. Click **OK**, then run **Resources > Updates > Check for Updates**
+4. Restart PixInsight
 
-### 手動インストール
+### Manual Installation
 
-1. このリポジトリを clone またはダウンロード
-2. PixInsight で **Script > Feature Scripts...** を開く
-3. **Add** → `manual-image-solver/javascript/` ディレクトリを選択
-4. **Done** で閉じる → **Script > Utilities > ManualImageSolver** がメニューに追加される
+1. Clone or download this repository
+2. In PixInsight, open **Script > Feature Scripts...**
+3. Click **Add** and select the `manual-image-solver/javascript/` directory
+4. Click **Done** — **Script > Utilities > ManualImageSolver** will appear in the menu
 
-Python や外部パッケージのインストールは不要です。
+No Python or external packages required.
 
-## 使い方
+## Usage
 
-### 1. スクリプトを起動する
+### 1. Launch the Script
 
-PixInsight で対象画像を開き、**Script > Utilities > ManualImageSolver** を実行します。
+Open the target image in PixInsight and run **Script > Utilities > ManualImageSolver**.
 
-ダイアログが開き、ストレッチ済みの画像が表示されます。
+The dialog opens with a stretched preview of the image.
 
-![メインダイアログ - 初期状態](docs/images/01_gui_initial.jpg)
+![Main dialog - initial state](docs/images/01_gui_initial.jpg)
 
-前回のセッションデータが残っている場合は、復元するかどうかの確認ダイアログが表示されます。
+If session data from a previous run exists, a dialog will ask whether to restore it.
 
-<img src="docs/images/08_restore_dialog.jpg" alt="セッション復元ダイアログ" width="480">
+<img src="docs/images/08_restore_dialog.jpg" alt="Session restore dialog" width="480">
 
-### 2. 星を登録する
+### 2. Register Stars
 
-画像上の星を**クリック**すると、セントロイド計算で星の中心に自動スナップし、座標入力ダイアログが開きます。
+**Click** on a star in the image. The centroid algorithm auto-snaps to the star center, and a coordinate input dialog opens.
 
-<img src="docs/images/02_star_dialog.jpg" alt="星座標入力ダイアログ" width="480">
+<img src="docs/images/02_star_dialog.jpg" alt="Star coordinate input dialog" width="480">
 
-**天体名**を入力して **Search** をクリックすると、CDS Sesame データベースから RA/DEC が自動入力されます。RA/DEC を直接入力することもできます。
+Enter an **object name** and click **Search** to auto-fill RA/DEC from the CDS Sesame database. You can also enter RA/DEC directly.
 
-#### 座標入力フォーマット
+#### Coordinate Input Formats
 
-| 項目 | フォーマット例 |
+| Field | Format Examples |
 |---|---|
-| RA（HMS） | `05 14 32.27` / `05:14:32.27` |
-| RA（度数） | `78.634` |
-| DEC（DMS） | `+07 24 25.4` / `-08:12:05.9` |
-| DEC（度数） | `7.407` / `-8.202` |
+| RA (HMS) | `05 14 32.27` / `05:14:32.27` |
+| RA (degrees) | `78.634` |
+| DEC (DMS) | `+07 24 25.4` / `-08:12:05.9` |
+| DEC (degrees) | `7.407` / `-8.202` |
 
-### 3. Solve を実行する
+### 3. Run Solve
 
-4 星以上を登録したら **Solve** ボタンをクリックします。WCS フィッティングが実行され、各星の残差が表示されます。
+Once 4 or more stars are registered, click the **Solve** button. WCS fitting is performed and residuals for each star are displayed.
 
-### 4. WCS を適用する
+### 4. Apply WCS
 
-**Apply to Image** をクリックすると、WCS がアクティブ画像に直接適用されます。
+Click **Apply to Image** to write the WCS directly to the active image.
 
-Process Console にはフィット結果の詳細（各星の残差、画像四隅の座標、FOV、回転角度など）が表示されます。
+The Process Console displays fit details including per-star residuals, corner coordinates, FOV, and rotation angle.
 
-![Process Console 出力](docs/images/06_process_console.jpg)
+![Process Console output](docs/images/06_process_console.jpg)
 
-### 5. 結果を確認する
+### 5. Verify Results
 
-WCS 適用後、PixInsight の **AnnotateImage** で星座や天体のアノテーションを重ねて確認できます。
+After WCS application, use PixInsight's **AnnotateImage** to overlay constellation lines and object annotations for verification.
 
-![AnnotateImage による確認](docs/images/07_annotated_image.jpg)
+![Verification with AnnotateImage](docs/images/07_annotated_image.jpg)
 
-### 操作ヒント
+### Tips
 
-- **星選択**: 画像上をクリック（セントロイドで自動スナップ）
-- **パン**: 左ボタンドラッグ、または中ボタンドラッグ
-- **ズーム**: マウスホイール（マウスカーソル位置を中心にズーム）
-- **ズームボタン**: Fit（ウィンドウにフィット）、1:1（等倍）、+（拡大）、-（縮小）
-- **ストレッチ切替**: ツールバーの STF: None / Linked / Unlinked ボタン（選択中のモードに ▶ マーカー表示）
-- **星の編集**: テーブル行をダブルクリック、または選択して **Edit...** ボタン
-- **星の削除**: 選択して **Remove** ボタン
-- **Export / Import**: 星ペアデータを JSON ファイルに保存・読み込み
+- **Star selection**: Click on the image (auto-snaps via centroid)
+- **Pan**: Left-button drag or middle-button drag
+- **Zoom**: Mouse wheel (centered on cursor position)
+- **Zoom buttons**: Fit (fit to window), 1:1 (actual size), + (zoom in), - (zoom out)
+- **Stretch toggle**: STF: None / Linked / Unlinked buttons in toolbar (active mode shown with ▶ marker)
+- **Edit stars**: Double-click a table row, or select and click **Edit...**
+- **Remove stars**: Select and click **Remove**
+- **Export / Import**: Save and load star pair data as JSON files
 
-### WCSApplier.js（手動 JSON 適用）
+### WCSApplier.js (Manual JSON Application)
 
-JSON ファイルから WCS を手動適用する場合:
-1. PixInsight で対象画像を開く
-2. **Script > Run Script File...** → `javascript/WCSApplier.js`
-3. JSON ファイルを選択 → WCS が画像に適用される
+To manually apply WCS from a JSON file:
+1. Open the target image in PixInsight
+2. **Script > Run Script File...** → select `javascript/WCSApplier.js`
+3. Select the JSON file → WCS is applied to the image
 
-## プロジェクト構成
+## Technical Details
 
-```
-manual-image-solver/
-├── javascript/
-│   ├── ManualImageSolver.js       # PJSR メイン（ネイティブ Dialog で全操作完結）
-│   ├── WCSApplier.js              # スタンドアロン JSON → WCS 適用
-│   └── wcs_math.js                # WCS 数学関数（PJSR + Node.js 両対応）
-├── tests/
-│   └── javascript/
-│       ├── test_wcs_math.js       # Node.js 単体テスト（WCS 数学関数）
-│       ├── test_parse_coords.js   # Node.js 単体テスト（座標パース + MTF）
-│       └── ManualSolverTest.js    # PJSR 統合テスト
-├── docs/
-│   ├── setup.md                   # セットアップガイド
-│   ├── specs.md                   # 技術仕様書
-│   ├── tests.md                   # テスト手順書
-│   └── images/                    # スクリーンショット
-└── .gitignore
-```
+See [docs/specs.md](docs/specs.md) for the full technical specification.
 
-## テスト
-
-```bash
-# Node.js 単体テスト（WCS 数学関数）
-node tests/javascript/test_wcs_math.js
-
-# Node.js 単体テスト（座標パース + MTF）
-node tests/javascript/test_parse_coords.js
-```
-
-PJSR 統合テスト: PixInsight で **Script > Run Script File...** → `tests/javascript/ManualSolverTest.js`
-
-## 技術詳細
-
-- **投影方式**: TAN（gnomonic）投影
-- **フィッティング**: CD行列の線形最小二乗法（クレーメルの公式）
-- **CRVAL 決定**: 星の天球座標重心から反復更新（5回）
-- **セントロイド**: 輝度重心法（バックグラウンド中央値差し引き）
-- **座標系**: PixInsight ピクセル（0-based, y=0 が上端）→ 標準 FITS（1-based, y=1 が下端）変換
-- **オートストレッチ**: median + MAD ベースの STF → MTF（中間調転送関数）、3 モード切替対応（None / Linked / Unlinked）
-- **ズーム**: 19 段階（6.25% ～ 800%）、マウスホイールはカーソル位置中心
-- **セッション保存**: PixInsight Settings API で星ペアデータ・ストレッチモードを自動保存、次回起動時に復元
-
-詳細は [docs/specs.md](docs/specs.md) を参照。
-
-## ライセンス
+## License
 
 Copyright (c) 2024-2026 Manual Image Solver Project

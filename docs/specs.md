@@ -256,3 +256,48 @@ Haversine 公式より数値的に安定。
 | 中角（5°〜30°）, TAN のみ | 1〜10 arcsec |
 | 広角（> 30°）, TAN + SIP | 1〜5 arcsec |
 | 広角（> 30°）, TAN のみ | > 10 arcsec（歪みが残る） |
+
+## 8. プロジェクト構成
+
+```
+manual-image-solver/
+├── javascript/
+│   ├── ManualImageSolver.js       # PJSR メイン（ネイティブ Dialog で全操作完結）
+│   ├── WCSApplier.js              # スタンドアロン JSON → WCS 適用
+│   └── wcs_math.js                # WCS 数学関数（PJSR + Node.js 両対応）
+├── tests/
+│   └── javascript/
+│       ├── test_wcs_math.js       # Node.js 単体テスト（WCS 数学関数）
+│       ├── test_parse_coords.js   # Node.js 単体テスト（座標パース + MTF）
+│       └── ManualSolverTest.js    # PJSR 統合テスト
+├── docs/
+│   ├── setup.md                   # セットアップガイド
+│   ├── specs.md                   # 技術仕様書（本ドキュメント）
+│   ├── tests.md                   # テスト手順書
+│   └── images/                    # スクリーンショット
+├── repository/
+│   ├── ManualImageSolver-x.x.x.zip  # PixInsight リポジトリ配布用 ZIP
+│   └── updates.xri                  # PixInsight アップデート定義
+├── build-release.sh               # リリースビルドスクリプト
+└── .gitignore
+```
+
+## 9. テスト
+
+### Node.js 単体テスト
+
+```bash
+# WCS 数学関数の精度検証
+node tests/javascript/test_wcs_math.js
+
+# 座標パース + MTF
+node tests/javascript/test_parse_coords.js
+```
+
+### PJSR 統合テスト
+
+PixInsight コンソールで実行:
+
+**Script > Run Script File...** → `tests/javascript/ManualSolverTest.js`
+
+WCS キーワード適用、セントロイド計算、Sesame 検索の統合テストを実行します。
