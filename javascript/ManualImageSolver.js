@@ -270,12 +270,24 @@ function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageH
    var crpix2 = wcsResult.crpix2;
 
    // 1. グリッド制御点: CD行列（線形マッピング）から生成
+   var STAR_EXCLUSION_RADIUS = 100; // 星付近のグリッド点を除外（px）
    var nGridX = 20, nGridY = 30;
    var gridPoints = [];
    for (var gy = 0; gy <= nGridY; gy++) {
       for (var gx = 0; gx <= nGridX; gx++) {
          var px = gx * (imageWidth - 1) / nGridX;
          var py = gy * (imageHeight - 1) / nGridY;
+         // 星に近すぎるグリッド点を除外（CD線形値と星の正確な値の矛盾を回避）
+         var tooClose = false;
+         for (var s = 0; s < starPairs.length; s++) {
+            var dx = px - starPairs[s].px;
+            var dy = py - starPairs[s].py;
+            if (dx * dx + dy * dy < STAR_EXCLUSION_RADIUS * STAR_EXCLUSION_RADIUS) {
+               tooClose = true;
+               break;
+            }
+         }
+         if (tooClose) continue;
          // FITS座標系に変換
          var u = (px + 1) - crpix1;
          var v = (imageHeight - py) - crpix2;
@@ -298,14 +310,10 @@ function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageH
       }
    }
 
-   // 3. Vector に変換（cI: Image座標, cW: World座標, weights）
+   // 3. Vector に変換（cI: Image座標, cW: World座標）
    var nTotal = gridPoints.length + starPoints.length;
    var cI = new Vector(nTotal * 2);
    var cW = new Vector(nTotal * 2);
-   var weights = new Vector(nTotal);
-
-   var W_GRID = 1;
-   var W_STAR = 10000;
 
    // グリッド点（PixInsight 0-based 座標）
    for (var i = 0; i < gridPoints.length; i++) {
@@ -313,7 +321,6 @@ function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageH
       cI.at(i * 2 + 1, gridPoints[i].py);
       cW.at(i * 2,     gridPoints[i].xi);
       cW.at(i * 2 + 1, gridPoints[i].eta);
-      weights.at(i, W_GRID);
    }
 
    // 星点
@@ -323,16 +330,19 @@ function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageH
       cI.at((off + i) * 2 + 1, starPoints[i].py);
       cW.at((off + i) * 2,     starPoints[i].xi);
       cW.at((off + i) * 2 + 1, starPoints[i].eta);
-      weights.at(off + i, W_STAR);
    }
 
-   // 4. 画像プロパティに書き込み
+   // 4. 画像プロパティに書き込み（全スプライン設定を完全に上書き）
    var attrs = PropertyAttribute_Storable | PropertyAttribute_Permanent;
    var prefix = "PCL:AstrometricSolution:SplineWorldTransformation:";
+   view.setPropertyValue(prefix + "RBFType", "ThinPlateSpline", PropertyType_String8, attrs);
+   view.setPropertyValue(prefix + "SplineOrder", 2, PropertyType_Int32, attrs);
+   view.setPropertyValue(prefix + "SplineSmoothness", 0, PropertyType_Float32, attrs);
+   view.setPropertyValue(prefix + "MaxSplinePoints", nTotal, PropertyType_Int32, attrs);
+   view.setPropertyValue(prefix + "UseSimplifiers", false, PropertyType_Boolean, attrs);
+   view.setPropertyValue(prefix + "SimplifierRejectFraction", 0.10, PropertyType_Float32, attrs);
    view.setPropertyValue(prefix + "ControlPoints:Image", cI, PropertyType_F64Vector, attrs);
    view.setPropertyValue(prefix + "ControlPoints:World", cW, PropertyType_F64Vector, attrs);
-   view.setPropertyValue(prefix + "ControlPoints:Weights", weights, PropertyType_F64Vector, attrs);
-   view.setPropertyValue(prefix + "MaxSplinePoints", nTotal, PropertyType_Int32, attrs);
 
    console.writeln("  制御点上書き: グリッド " + gridPoints.length + " + 星 " + starPoints.length + " = " + nTotal + " 点");
 }
