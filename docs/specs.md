@@ -231,6 +231,7 @@ Haversine 公式より数値的に安定。
 1. 既存の WCS 関連キーワードを全て除去（`isWCSKeyword()` で判定）
 2. 新しい WCS キーワードを追加（`makeFITSKeyword()` で型を自動判定）
 3. `window.regenerateAstrometricSolution()` でアストロメトリック表示を再生成
+4. 補間モード時: `setCustomControlPoints()` で制御点を直接上書き（§7.7 参照）
 
 ## 6. 天体名検索（CDS Sesame）
 
@@ -409,21 +410,34 @@ G = D D^T（m×m）を計算し、Gy = b をガウス消去法で解き、x = D^
 
 ##### 解決策
 
-`regenerateAstrometricSolution()` 後に、画像プロパティの制御点を直接上書きする:
+`regenerateAstrometricSolution()` 後に、画像プロパティのスプライン設定と制御点を完全に上書きする:
 
-1. **グリッド制御点**（20×30 = 651 点, 重み W=1）: CD 行列の線形マッピングから生成。画像全域での滑らかなベースラインを提供
-2. **星制御点**（星数分, 重み W=10000）: 正確な RA/Dec → TAN 投影で gnomonic 座標を計算。既知位置での正確な対応を保証
+1. **グリッド制御点**（21×31 格子, 最大 651 点）: CD 行列の線形マッピングから生成。画像全域での滑らかなベースラインを提供。星位置から半径 100px 以内のグリッド点は除外（CD 線形値と星の正確な TAN 投影値の矛盾を回避）
+2. **星制御点**（星数分）: 正確な RA/Dec → TAN 投影で gnomonic 座標を計算。既知位置での正確な対応を保証
 
-重み差（10000:1）により、RBF スプラインは星位置では星制御点が支配的（正確な注釈位置）、離れた場所では CD 線形ベースラインに漸近（滑らかな補間）。RBF スプラインは多項式と異なり Runge 振動を起こさない。
+RBF スプライン（Thin Plate Spline）は多項式と異なり Runge 振動を起こさないため、星位置では正確な注釈位置を実現し、離れた場所では CD 線形ベースラインに沿って滑らかに補間する。
 
 ##### 書き込み先プロパティ
 
+スプライン設定プロパティ（`regenerateAstrometricSolution()` が生成した値を完全に上書き）:
+
+| プロパティキー | 型 | 値 |
+|---|---|---|
+| `...:SplineWorldTransformation:RBFType` | String8 | `ThinPlateSpline` |
+| `...:SplineWorldTransformation:SplineOrder` | Int32 | `2` |
+| `...:SplineWorldTransformation:SplineSmoothness` | Float32 | `0`（厳密補間） |
+| `...:SplineWorldTransformation:MaxSplinePoints` | Int32 | 制御点の総数 |
+| `...:SplineWorldTransformation:UseSimplifiers` | Boolean | `false` |
+| `...:SplineWorldTransformation:SimplifierRejectFraction` | Float32 | `0.10` |
+
+制御点プロパティ（プレフィックス: `PCL:AstrometricSolution:`）:
+
 | プロパティキー | 型 | 内容 |
 |---|---|---|
-| `PCL:AstrometricSolution:SplineWorldTransformation:ControlPoints:Image` | F64Vector | PixInsight 0-based 座標 (px, py) × N 点 |
-| `PCL:AstrometricSolution:SplineWorldTransformation:ControlPoints:World` | F64Vector | gnomonic 投影座標 (ξ, η) in degrees × N 点 |
-| `PCL:AstrometricSolution:SplineWorldTransformation:ControlPoints:Weights` | F64Vector | 各制御点の重み × N 点 |
-| `PCL:AstrometricSolution:SplineWorldTransformation:MaxSplinePoints` | Int32 | 制御点の総数 |
+| `...:SplineWorldTransformation:ControlPoints:Image` | F64Vector | PixInsight 0-based 座標 (px, py) × N 点（インターリーブ） |
+| `...:SplineWorldTransformation:ControlPoints:World` | F64Vector | gnomonic 投影座標 (ξ, η) in degrees × N 点（インターリーブ） |
+
+**注意**: `ControlPoints:Weights` は PixInsight の SplineWorldTransformation の公式プロパティに存在しない。書き込むとバリデーションエラー（`invalid or corrupted control point structures`）が発生する。
 
 ##### 適用条件
 

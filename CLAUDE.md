@@ -39,7 +39,7 @@ node tests/javascript/test_parse_coords.js
 
 ### PJSR ネイティブ構成（JavaScript のみ）
 
-- **`javascript/wcs_math.js`**: WCS 数学ライブラリ。`#include` で ManualImageSolver.js に取り込み。**PJSR と Node.js の両方**で動作する純粋 JavaScript。`var` 宣言・ES5 スタイルが必須（PJSR は `let`/`const`/アロー関数を未サポート）。
+- **`javascript/wcs_math.js`**: WCS 数学ライブラリ。`#include` で ManualImageSolver.js に取り込み。**PJSR と Node.js の両方**で動作する純粋 JavaScript。`var` 宣言・ES5 スタイルが必須（PJSR は `let`/`const`/アロー関数を未サポート）。コード内の変数名・関数名・コメント・コンソール出力（`console.writeln`）は全て英語で記述する。
 - **`javascript/wcs_keywords.js`**: FITS WCS キーワードユーティリティ（`isWCSKeyword`, `makeFITSKeyword`）。ManualImageSolver.js と WCSApplier.js の両方から `#include` で共有。PJSR 専用。
 - **`javascript/ManualImageSolver.js`**: メインスクリプト。全 UI を PJSR Dialog で構築。
   - `ImagePreviewControl` (ScrollBox): スクロール状態を手動管理（scrollX/scrollY）、ズーム/パン/クリック
@@ -72,6 +72,7 @@ node tests/javascript/test_parse_coords.js
 - **オートストレッチ**: median + MAD ベースの STF パラメータ → MTF（中間調転送関数）で Bitmap 生成。大画像は MAX_BITMAP_EDGE (2048px) に縮小。
 - **座標パース**: `parseRAInput()` は HMS (スペース/コロン区切り) と度数の両方を受け付け。`parseDECInput()` は ±DMS と度数の両方。
 - **SIP 歪み補正**: 近似モード（approx）と補間モード（interp）の2モード。近似モードは 6星以上で SIP order 2、10星以上で order 3。補間モードは TAN-only RMS がピクセルスケールの5倍以上のとき自動選択、項数≥星数の高次 SIP で全制御点を正確に通る最小ノルム解を使用。CD 行列と SIP 係数の反復精密化（最大10回）で収束。逆 SIP (AP, BP) も計算し PixInsight の `regenerateAstrometricSolution()` 対応。
+- **制御点直接設定（interp モード）**: 補間モードでは高次 SIP 多項式が星間で暴走し、`regenerateAstrometricSolution()` が生成する制御点が汚染されるため、Apply 時に制御点を直接上書き。CD 行列の線形マッピングによるグリッド制御点 + 星の正確な TAN 投影による星制御点を RBF スプライン（ThinPlateSpline）の制御点として書き込む。**重要**: `ControlPoints:Weights` は PixInsight の SplineWorldTransformation に存在しない非標準プロパティであり、書き込むとバリデーションエラーになる。スプライン設定プロパティ（RBFType, SplineOrder 等）6つ + 制御点プロパティ2つの計8プロパティを全て書き込む必要がある。
 
 ## テスト方針
 

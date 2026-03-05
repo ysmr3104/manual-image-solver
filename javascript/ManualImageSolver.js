@@ -344,7 +344,7 @@ function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageH
    view.setPropertyValue(prefix + "ControlPoints:Image", cI, PropertyType_F64Vector, attrs);
    view.setPropertyValue(prefix + "ControlPoints:World", cW, PropertyType_F64Vector, attrs);
 
-   console.writeln("  制御点上書き: グリッド " + gridPoints.length + " + 星 " + starPoints.length + " = " + nTotal + " 点");
+   console.writeln("  Control points overwritten: grid " + gridPoints.length + " + stars " + starPoints.length + " = " + nTotal + " points");
 }
 
 //============================================================================
