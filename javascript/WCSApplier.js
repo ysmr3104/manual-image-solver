@@ -9,7 +9,7 @@
 // Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.1.0"
+#define VERSION "1.1.1"
 
 #include <pjsr/StdIcon.jsh>
 #include <pjsr/StdButton.jsh>
@@ -28,8 +28,9 @@ function applyWCS(window, wcsData) {
    }
 
    var wcs = wcsData.wcs;
-   cleanedKw.push(makeFITSKeyword("CTYPE1", wcs.ctype1 || "RA---TAN"));
-   cleanedKw.push(makeFITSKeyword("CTYPE2", wcs.ctype2 || "DEC--TAN"));
+   var hasSip = wcs.sip && wcs.sip.order > 0;
+   cleanedKw.push(makeFITSKeyword("CTYPE1", hasSip ? "RA---TAN-SIP" : (wcs.ctype1 || "RA---TAN")));
+   cleanedKw.push(makeFITSKeyword("CTYPE2", hasSip ? "DEC--TAN-SIP" : (wcs.ctype2 || "DEC--TAN")));
    cleanedKw.push(makeFITSKeyword("CRVAL1", wcs.crval1));
    cleanedKw.push(makeFITSKeyword("CRVAL2", wcs.crval2));
    cleanedKw.push(makeFITSKeyword("CRPIX1", wcs.crpix1));
@@ -43,6 +44,34 @@ function applyWCS(window, wcsData) {
    cleanedKw.push(makeFITSKeyword("RADESYS", "ICRS"));
    cleanedKw.push(makeFITSKeyword("EQUINOX", 2000.0));
    cleanedKw.push(makeFITSKeyword("PLTSOLVD", "T"));
+
+   // SIP distortion keywords
+   if (hasSip) {
+      var sip = wcs.sip;
+      cleanedKw.push(makeFITSKeyword("A_ORDER", sip.order));
+      cleanedKw.push(makeFITSKeyword("B_ORDER", sip.order));
+      if (sip.a) {
+         for (var i = 0; i < sip.a.length; i++) {
+            cleanedKw.push(makeFITSKeyword("A_" + sip.a[i][0] + "_" + sip.a[i][1], sip.a[i][2]));
+         }
+      }
+      if (sip.b) {
+         for (var i = 0; i < sip.b.length; i++) {
+            cleanedKw.push(makeFITSKeyword("B_" + sip.b[i][0] + "_" + sip.b[i][1], sip.b[i][2]));
+         }
+      }
+      if (sip.ap && sip.bp) {
+         var apOrder = sip.invOrder || sip.order;
+         cleanedKw.push(makeFITSKeyword("AP_ORDER", apOrder));
+         cleanedKw.push(makeFITSKeyword("BP_ORDER", apOrder));
+         for (var i = 0; i < sip.ap.length; i++) {
+            cleanedKw.push(makeFITSKeyword("AP_" + sip.ap[i][0] + "_" + sip.ap[i][1], sip.ap[i][2]));
+         }
+         for (var i = 0; i < sip.bp.length; i++) {
+            cleanedKw.push(makeFITSKeyword("BP_" + sip.bp[i][0] + "_" + sip.bp[i][1], sip.bp[i][2]));
+         }
+      }
+   }
 
    window.keywords = cleanedKw;
    window.regenerateAstrometricSolution();

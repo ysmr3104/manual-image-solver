@@ -11,7 +11,7 @@
 // Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.1.0"
+#define VERSION "1.1.1"
 
 #include <pjsr/DataType.jsh>
 #include <pjsr/StdIcon.jsh>
@@ -70,8 +70,13 @@ function decToDMS(decDeg) {
 function pixelToRaDec(wcs, px, py, imageHeight) {
    var u = (px + 1.0) - wcs.crpix1;
    var v = (imageHeight - py) - wcs.crpix2;
-   var xi  = wcs.cd1_1 * u + wcs.cd1_2 * v;
-   var eta = wcs.cd2_1 * u + wcs.cd2_2 * v;
+   var up = u, vp = v;
+   if (wcs.sip) {
+      up = u + evalSipPolynomial(wcs.sip.a, u, v);
+      vp = v + evalSipPolynomial(wcs.sip.b, u, v);
+   }
+   var xi  = wcs.cd1_1 * up + wcs.cd1_2 * vp;
+   var eta = wcs.cd2_1 * up + wcs.cd2_2 * vp;
    return tanDeproject([wcs.crval1, wcs.crval2], [xi, eta]);
 }
 
@@ -183,8 +188,9 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
          cleanedKw.push(existingKw[i]);
    }
 
-   cleanedKw.push(makeFITSKeyword("CTYPE1", "RA---TAN"));
-   cleanedKw.push(makeFITSKeyword("CTYPE2", "DEC--TAN"));
+   var hasSip = wcsResult.sip && wcsResult.sip.order > 0;
+   cleanedKw.push(makeFITSKeyword("CTYPE1", hasSip ? "RA---TAN-SIP" : "RA---TAN"));
+   cleanedKw.push(makeFITSKeyword("CTYPE2", hasSip ? "DEC--TAN-SIP" : "DEC--TAN"));
    cleanedKw.push(makeFITSKeyword("CRVAL1", wcsResult.crval1));
    cleanedKw.push(makeFITSKeyword("CRVAL2", wcsResult.crval2));
    cleanedKw.push(makeFITSKeyword("CRPIX1", wcsResult.crpix1));
@@ -199,12 +205,37 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
    cleanedKw.push(makeFITSKeyword("EQUINOX", 2000.0));
    cleanedKw.push(makeFITSKeyword("PLTSOLVD", "T"));
 
+   // SIP distortion keywords
+   if (hasSip) {
+      var sip = wcsResult.sip;
+      cleanedKw.push(makeFITSKeyword("A_ORDER", sip.order));
+      cleanedKw.push(makeFITSKeyword("B_ORDER", sip.order));
+      for (var i = 0; i < sip.a.length; i++) {
+         cleanedKw.push(makeFITSKeyword("A_" + sip.a[i][0] + "_" + sip.a[i][1], sip.a[i][2]));
+      }
+      for (var i = 0; i < sip.b.length; i++) {
+         cleanedKw.push(makeFITSKeyword("B_" + sip.b[i][0] + "_" + sip.b[i][1], sip.b[i][2]));
+      }
+      if (sip.ap && sip.bp) {
+         var apOrder = sip.invOrder || sip.order;
+         cleanedKw.push(makeFITSKeyword("AP_ORDER", apOrder));
+         cleanedKw.push(makeFITSKeyword("BP_ORDER", apOrder));
+         for (var i = 0; i < sip.ap.length; i++) {
+            cleanedKw.push(makeFITSKeyword("AP_" + sip.ap[i][0] + "_" + sip.ap[i][1], sip.ap[i][2]));
+         }
+         for (var i = 0; i < sip.bp.length; i++) {
+            cleanedKw.push(makeFITSKeyword("BP_" + sip.bp[i][0] + "_" + sip.bp[i][1], sip.bp[i][2]));
+         }
+      }
+   }
+
    // Write image center RA/DEC as OBJCTRA/OBJCTDEC
    var wcsObj = {
       crval1: wcsResult.crval1, crval2: wcsResult.crval2,
       crpix1: wcsResult.crpix1, crpix2: wcsResult.crpix2,
       cd1_1: wcsResult.cd[0][0], cd1_2: wcsResult.cd[0][1],
-      cd2_1: wcsResult.cd[1][0], cd2_2: wcsResult.cd[1][1]
+      cd2_1: wcsResult.cd[1][0], cd2_2: wcsResult.cd[1][1],
+      sip: wcsResult.sip
    };
    var imgCenter = pixelToRaDec(wcsObj, imageWidth / 2.0, imageHeight / 2.0, imageHeight);
    cleanedKw.push(makeFITSKeyword("OBJCTRA", raToHMS(imgCenter[0])));
@@ -1267,8 +1298,11 @@ ManualSolverDialog.prototype.refreshAll = function () {
    var nStars = this.starPairs.length;
    var statusText = nStars + " star" + (nStars !== 1 ? "s" : "") + " registered";
    if (this.wcsResult && this.wcsResult.success) {
-      statusText += " | RMS " + this.wcsResult.rms_arcsec.toFixed(2) + "\""
-         + " | Scale " + this.wcsResult.pixelScale_arcsec.toFixed(2) + "\"/px";
+      statusText += " | RMS " + this.wcsResult.rms_arcsec.toFixed(2) + "\"";
+      if (this.wcsResult.sip) {
+         statusText += " (SIP" + this.wcsResult.sip.order + (this.wcsResult.sipMode === "interp" ? "i" : "") + ")";
+      }
+      statusText += " | Scale " + this.wcsResult.pixelScale_arcsec.toFixed(2) + "\"/px";
    }
    this.statusLabel.text = statusText;
 
@@ -1324,6 +1358,11 @@ ManualSolverDialog.prototype.doSolve = function () {
    console.writeln("");
    console.writeln("<b>WCS Fitting Result:</b>");
    console.writeln("  RMS: " + this.wcsResult.rms_arcsec.toFixed(3) + " arcsec");
+   if (this.wcsResult.sip) {
+      var modeStr = this.wcsResult.sipMode === "interp" ? " (補間)" : "";
+      console.writeln("  SIP order: " + this.wcsResult.sip.order + modeStr);
+      console.writeln("  TAN-only RMS: " + this.wcsResult.rms_arcsec_tan.toFixed(3) + " arcsec");
+   }
    console.writeln("  Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px");
    console.writeln("  Stars: " + this.starPairs.length);
 
@@ -1347,9 +1386,15 @@ ManualSolverDialog.prototype.doApply = function () {
       crval1: this.wcsResult.crval1, crval2: this.wcsResult.crval2,
       crpix1: this.wcsResult.crpix1, crpix2: this.wcsResult.crpix2,
       cd1_1: this.wcsResult.cd[0][0], cd1_2: this.wcsResult.cd[0][1],
-      cd2_1: this.wcsResult.cd[1][0], cd2_2: this.wcsResult.cd[1][1]
+      cd2_1: this.wcsResult.cd[1][0], cd2_2: this.wcsResult.cd[1][1],
+      sip: this.wcsResult.sip
    };
    console.writeln("  Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px");
+   if (this.wcsResult.sip) {
+      var modeStr2 = this.wcsResult.sipMode === "interp" ? " (補間)" : "";
+      console.writeln("  SIP order: " + this.wcsResult.sip.order + modeStr2);
+      console.writeln("  TAN-only RMS: " + this.wcsResult.rms_arcsec_tan.toFixed(3) + " arcsec");
+   }
    displayStarPairs(this.starPairs, this.wcsResult.residuals);
    displayImageCoordinates(wcsObj, this.image.width, this.image.height);
 
@@ -1359,11 +1404,18 @@ ManualSolverDialog.prototype.doApply = function () {
    // Save session on successful Apply
    this.saveSessionData();
 
+   var sipInfo = "";
+   if (this.wcsResult.sip) {
+      var modeLabel = this.wcsResult.sipMode === "interp" ? " (補間)" : "";
+      sipInfo = "\nSIP order: " + this.wcsResult.sip.order + modeLabel
+         + "\nTAN-only RMS: " + this.wcsResult.rms_arcsec_tan.toFixed(3) + " arcsec";
+   }
    var mb = new MessageBox(
       "WCS applied successfully.\n\n"
       + "RMS: " + this.wcsResult.rms_arcsec.toFixed(3) + " arcsec\n"
       + "Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px\n"
-      + "Stars: " + this.starPairs.length,
+      + "Stars: " + this.starPairs.length
+      + sipInfo,
       TITLE, StdIcon_Information, StdButton_Ok);
    mb.execute();
 };

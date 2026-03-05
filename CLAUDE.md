@@ -71,7 +71,7 @@ node tests/javascript/test_parse_coords.js
 - **RA のラップアラウンド**: RA の平均値計算はベクトル平均（cos/sin）を使用。
 - **オートストレッチ**: median + MAD ベースの STF パラメータ → MTF（中間調転送関数）で Bitmap 生成。大画像は MAX_BITMAP_EDGE (2048px) に縮小。
 - **座標パース**: `parseRAInput()` は HMS (スペース/コロン区切り) と度数の両方を受け付け。`parseDECInput()` は ±DMS と度数の両方。
-- **SIP 歪み補正**: 現在未実装。広角で精度が必要な場合に追加予定。
+- **SIP 歪み補正**: 近似モード（approx）と補間モード（interp）の2モード。近似モードは 6星以上で SIP order 2、10星以上で order 3。補間モードは TAN-only RMS がピクセルスケールの5倍以上のとき自動選択、項数≥星数の高次 SIP で全制御点を正確に通る最小ノルム解を使用。CD 行列と SIP 係数の反復精密化（最大10回）で収束。逆 SIP (AP, BP) も計算し PixInsight の `regenerateAstrometricSolution()` 対応。
 
 ## テスト方針
 

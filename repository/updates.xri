@@ -5,7 +5,7 @@
       <brief_description>Manual plate solver for PixInsight</brief_description>
    </description>
    <platform os="all" arch="noarch" version="1.8.9:9.9.9">
-      <package fileName="ManualImageSolver-1.1.0.zip"
+      <package fileName="ManualImageSolver-1.1.1.zip"
                sha1="479dfb84d688519244d01e87861fb9e5dbfc092f"
                type="script"
                releaseDate="20260304">
