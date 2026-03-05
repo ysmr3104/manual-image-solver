@@ -22,6 +22,8 @@
 #include <pjsr/UndoFlag.jsh>
 #include <pjsr/NumericControl.jsh>
 #include <pjsr/Color.jsh>
+#include <pjsr/PropertyType.jsh>
+#include <pjsr/PropertyAttribute.jsh>
 
 #include "wcs_math.js"
 #include "wcs_keywords.js"
@@ -243,6 +245,96 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
 
    targetWindow.keywords = cleanedKw;
    targetWindow.regenerateAstrometricSolution();
+}
+
+//----------------------------------------------------------------------------
+// 制御点直接設定（interp モード時の AnnotateImage 修正用）
+//
+// 広角画像で高次 SIP（補間モード）を使用すると、forward SIP 多項式が星間で
+// 暴走し、regenerateAstrometricSolution() が生成する制御点が汚染される。
+// AnnotateImage は AP/BP（逆SIP）を使わず制御点ベースの RBF スプラインで
+// sky→pixel 変換するため、汚染された制御点 → 注釈位置のズレが発生する。
+//
+// 解決策: CD 行列の線形マッピングからグリッド制御点を生成し、既知の星位置に
+// 高重みの制御点を追加して、RBF スプラインが星位置では正確に、間は滑らかに
+// 補間するようにする。
+//----------------------------------------------------------------------------
+function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageHeight) {
+   // interp モード以外では不要（approx モードの forward SIP は滑らか）
+   if (!wcsResult.sipMode || wcsResult.sipMode !== "interp") return;
+
+   var view = window.mainView;
+   var crval = [wcsResult.crval1, wcsResult.crval2];
+   var cd = wcsResult.cd;
+   var crpix1 = wcsResult.crpix1;
+   var crpix2 = wcsResult.crpix2;
+
+   // 1. グリッド制御点: CD行列（線形マッピング）から生成
+   var nGridX = 20, nGridY = 30;
+   var gridPoints = [];
+   for (var gy = 0; gy <= nGridY; gy++) {
+      for (var gx = 0; gx <= nGridX; gx++) {
+         var px = gx * (imageWidth - 1) / nGridX;
+         var py = gy * (imageHeight - 1) / nGridY;
+         // FITS座標系に変換
+         var u = (px + 1) - crpix1;
+         var v = (imageHeight - py) - crpix2;
+         // CD行列による線形マッピング → gnomonic座標（度）
+         var xi = cd[0][0] * u + cd[0][1] * v;
+         var eta = cd[1][0] * u + cd[1][1] * v;
+         gridPoints.push({ px: px, py: py, xi: xi, eta: eta });
+      }
+   }
+
+   // 2. 星制御点: 正確な RA/Dec → TAN投影
+   var starPoints = [];
+   for (var i = 0; i < starPairs.length; i++) {
+      var proj = tanProject(crval, [starPairs[i].ra, starPairs[i].dec]);
+      if (proj) {
+         starPoints.push({
+            px: starPairs[i].px, py: starPairs[i].py,
+            xi: proj[0], eta: proj[1]
+         });
+      }
+   }
+
+   // 3. Vector に変換（cI: Image座標, cW: World座標, weights）
+   var nTotal = gridPoints.length + starPoints.length;
+   var cI = new Vector(nTotal * 2);
+   var cW = new Vector(nTotal * 2);
+   var weights = new Vector(nTotal);
+
+   var W_GRID = 1;
+   var W_STAR = 10000;
+
+   // グリッド点（PixInsight 0-based 座標）
+   for (var i = 0; i < gridPoints.length; i++) {
+      cI.at(i * 2,     gridPoints[i].px);
+      cI.at(i * 2 + 1, gridPoints[i].py);
+      cW.at(i * 2,     gridPoints[i].xi);
+      cW.at(i * 2 + 1, gridPoints[i].eta);
+      weights.at(i, W_GRID);
+   }
+
+   // 星点
+   var off = gridPoints.length;
+   for (var i = 0; i < starPoints.length; i++) {
+      cI.at((off + i) * 2,     starPoints[i].px);
+      cI.at((off + i) * 2 + 1, starPoints[i].py);
+      cW.at((off + i) * 2,     starPoints[i].xi);
+      cW.at((off + i) * 2 + 1, starPoints[i].eta);
+      weights.at(off + i, W_STAR);
+   }
+
+   // 4. 画像プロパティに書き込み
+   var attrs = PropertyAttribute_Storable | PropertyAttribute_Permanent;
+   var prefix = "PCL:AstrometricSolution:SplineWorldTransformation:";
+   view.setPropertyValue(prefix + "ControlPoints:Image", cI, PropertyType_F64Vector, attrs);
+   view.setPropertyValue(prefix + "ControlPoints:World", cW, PropertyType_F64Vector, attrs);
+   view.setPropertyValue(prefix + "ControlPoints:Weights", weights, PropertyType_F64Vector, attrs);
+   view.setPropertyValue(prefix + "MaxSplinePoints", nTotal, PropertyType_Int32, attrs);
+
+   console.writeln("  制御点上書き: グリッド " + gridPoints.length + " + 星 " + starPoints.length + " = " + nTotal + " 点");
 }
 
 //============================================================================
@@ -1380,6 +1472,10 @@ ManualSolverDialog.prototype.doApply = function () {
    console.writeln("<b>Applying WCS to image...</b>");
 
    applyWCSToImage(this.targetWindow, this.wcsResult, this.image.width, this.image.height);
+
+   // interp モード時に制御点を上書き（AnnotateImage の注釈位置ズレ修正）
+   setCustomControlPoints(this.targetWindow, this.wcsResult,
+      this.starPairs, this.image.width, this.image.height);
 
    // Console output
    var wcsObj = {

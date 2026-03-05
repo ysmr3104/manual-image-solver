@@ -401,6 +401,35 @@ G = D D^T（m×m）を計算し、Gy = b をガウス消去法で解き、x = D^
 - ステータス: `(SIPNi)` と表示（i = interpolation）
 - 結果オブジェクトに `sipMode: "interp"` or `"approx"` を追加
 
+#### 制御点直接設定（AnnotateImage 修正）
+
+##### 問題
+
+広角画像（90° FOV 等）で補間モード（高次 SIP）を使用すると、forward SIP 多項式が制御点間で暴走する（Runge 現象）。`regenerateAstrometricSolution()` がこの暴走した forward SIP をグリッドサンプリングして制御点を生成するため、制御点が汚染される。AnnotateImage は AP/BP（逆 SIP）を使わず、制御点から構築した RBF スプラインで sky→pixel 変換するため、汚染された制御点により注釈位置がずれる。
+
+##### 解決策
+
+`regenerateAstrometricSolution()` 後に、画像プロパティの制御点を直接上書きする:
+
+1. **グリッド制御点**（20×30 = 651 点, 重み W=1）: CD 行列の線形マッピングから生成。画像全域での滑らかなベースラインを提供
+2. **星制御点**（星数分, 重み W=10000）: 正確な RA/Dec → TAN 投影で gnomonic 座標を計算。既知位置での正確な対応を保証
+
+重み差（10000:1）により、RBF スプラインは星位置では星制御点が支配的（正確な注釈位置）、離れた場所では CD 線形ベースラインに漸近（滑らかな補間）。RBF スプラインは多項式と異なり Runge 振動を起こさない。
+
+##### 書き込み先プロパティ
+
+| プロパティキー | 型 | 内容 |
+|---|---|---|
+| `PCL:AstrometricSolution:SplineWorldTransformation:ControlPoints:Image` | F64Vector | PixInsight 0-based 座標 (px, py) × N 点 |
+| `PCL:AstrometricSolution:SplineWorldTransformation:ControlPoints:World` | F64Vector | gnomonic 投影座標 (ξ, η) in degrees × N 点 |
+| `PCL:AstrometricSolution:SplineWorldTransformation:ControlPoints:Weights` | F64Vector | 各制御点の重み × N 点 |
+| `PCL:AstrometricSolution:SplineWorldTransformation:MaxSplinePoints` | Int32 | 制御点の総数 |
+
+##### 適用条件
+
+- 補間モード（`sipMode === "interp"`）の場合のみ適用
+- 近似モードでは forward SIP が滑らかであり、`regenerateAstrometricSolution()` の制御点がそのまま使える
+
 ## 8. プロジェクト構成
 
 ```
