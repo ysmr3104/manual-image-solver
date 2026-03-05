@@ -921,20 +921,20 @@ WCSFitter.prototype.solve = function () {
    var crpix2 = this.crpix2;
 
    // --- 1. CRVAL initial value = centroid of star celestial coordinates ---
-   var crval1 = 0;
-   var crval2 = 0;
-
-   // Average RA using vector mean to handle wraparound
-   var sumCosRA = 0, sumSinRA = 0;
+   // Use 3D unit vector mean on the celestial sphere.
+   // This correctly handles circumpolar fields where stars wrap around in RA.
+   var sumVX = 0, sumVY = 0, sumVZ = 0;
    for (var i = 0; i < nStars; i++) {
       var raRad = stars[i].ra * Math.PI / 180.0;
-      sumCosRA += Math.cos(raRad);
-      sumSinRA += Math.sin(raRad);
-      crval2 += stars[i].dec;
+      var decRad = stars[i].dec * Math.PI / 180.0;
+      sumVX += Math.cos(decRad) * Math.cos(raRad);
+      sumVY += Math.cos(decRad) * Math.sin(raRad);
+      sumVZ += Math.sin(decRad);
    }
-   crval1 = Math.atan2(sumSinRA, sumCosRA) * 180.0 / Math.PI;
+   var crval1 = Math.atan2(sumVY, sumVX) * 180.0 / Math.PI;
    if (crval1 < 0) crval1 += 360.0;
-   crval2 /= nStars;
+   var rXY = Math.sqrt(sumVX * sumVX + sumVY * sumVY);
+   var crval2 = Math.atan2(sumVZ, rXY) * 180.0 / Math.PI;
 
    // --- 2-4. Iterate: TAN projection -> CD matrix fit -> CRVAL update ---
    var cd = [[0, 0], [0, 0]];
@@ -1018,8 +1018,21 @@ WCSFitter.prototype.solve = function () {
 
       // Inverse transform residual centroid to celestial coords and update CRVAL
       var newCrval = tanDeproject([crval1, crval2], [meanDXi, meanDEta]);
-      crval1 = newCrval[0];
-      crval2 = newCrval[1];
+
+      // Verify that updated CRVAL doesn't break TAN projection for any star.
+      // For wide-field images, the non-linear TAN projection can cause the
+      // CRVAL update to overshoot, pushing edge stars beyond the 90-degree limit.
+      var updateOk = true;
+      for (var j = 0; j < nStars; j++) {
+         if (tanProject(newCrval, [stars[j].ra, stars[j].dec]) === null) {
+            updateOk = false;
+            break;
+         }
+      }
+      if (updateOk) {
+         crval1 = newCrval[0];
+         crval2 = newCrval[1];
+      }
    }
 
    // --- 5. Compute TAN-only residuals ---

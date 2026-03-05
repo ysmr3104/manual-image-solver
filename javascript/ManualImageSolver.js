@@ -11,7 +11,7 @@
 // Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.2.0"
+#define VERSION "1.2.1"
 
 #include <pjsr/DataType.jsh>
 #include <pjsr/StdIcon.jsh>
@@ -539,6 +539,36 @@ function createStretchedBitmap(image, maxEdge, stretchMode) {
    return { bitmap: bmp, scale: scale, width: bmpW, height: bmpH };
 }
 
+// Rotate a Bitmap by 0/90/180/270 degrees CW
+function rotateBitmap(bitmap, angle) {
+   if (angle === 0 || angle === undefined) return bitmap;
+
+   var w = bitmap.width;
+   var h = bitmap.height;
+   var rotBmp;
+
+   if (angle === 90) {
+      rotBmp = new Bitmap(h, w);
+      for (var y = 0; y < h; y++)
+         for (var x = 0; x < w; x++)
+            rotBmp.setPixel(h - 1 - y, x, bitmap.pixel(x, y));
+   } else if (angle === 180) {
+      rotBmp = new Bitmap(w, h);
+      for (var y = 0; y < h; y++)
+         for (var x = 0; x < w; x++)
+            rotBmp.setPixel(w - 1 - x, h - 1 - y, bitmap.pixel(x, y));
+   } else if (angle === 270) {
+      rotBmp = new Bitmap(h, w);
+      for (var y = 0; y < h; y++)
+         for (var x = 0; x < w; x++)
+            rotBmp.setPixel(y, w - 1 - x, bitmap.pixel(x, y));
+   } else {
+      return bitmap;
+   }
+
+   return rotBmp;
+}
+
 //============================================================================
 // ImagePreviewControl: Image display + zoom/pan/click
 //
@@ -552,7 +582,9 @@ function ImagePreviewControl(parent) {
    this.__base__ = ScrollBox;
    this.__base__(parent);
 
-   this.bitmap = null;        // Stretched bitmap
+   this.bitmap = null;        // Stretched bitmap (original, unrotated)
+   this.displayBitmap = null; // Rotated bitmap for display
+   this.rotationAngle = 0;   // Display rotation: 0, 90, 180, 270 (CW)
    this.bitmapScale = 1.0;    // Original image -> bitmap scale factor
    this.zoomLevel = 1.0;      // Display zoom level
    this.starMarkers = [];     // [{imgX, imgY, index}]
@@ -601,22 +633,24 @@ function ImagePreviewControl(parent) {
       var g = new Graphics(this);
       g.fillRect(this.boundsRect, new Brush(0xFF202020));
 
-      if (self.bitmap) {
-         var dispW = Math.round(self.bitmap.width * self.zoomLevel);
-         var dispH = Math.round(self.bitmap.height * self.zoomLevel);
+      var dbmp = self.displayBitmap || self.bitmap;
+      if (dbmp) {
+         var dispW = Math.round(dbmp.width * self.zoomLevel);
+         var dispH = Math.round(dbmp.height * self.zoomLevel);
 
          // Draw with scroll offset
          g.drawScaledBitmap(
             new Rect(-self.scrollX, -self.scrollY,
                      dispW - self.scrollX, dispH - self.scrollY),
-            self.bitmap);
+            dbmp);
 
          // Draw markers
          for (var i = 0; i < self.starMarkers.length; i++) {
             var mk = self.starMarkers[i];
-            // Image coords -> content coords -> display coords (minus scroll offset)
-            var vx = (mk.imgX * self.bitmapScale) * self.zoomLevel - self.scrollX;
-            var vy = (mk.imgY * self.bitmapScale) * self.zoomLevel - self.scrollY;
+            // Image coords -> rotated display coords -> screen coords
+            var rp = self.imageToDisplay(mk.imgX, mk.imgY);
+            var vx = rp.x * self.zoomLevel - self.scrollX;
+            var vy = rp.y * self.zoomLevel - self.scrollY;
 
             var isSelected = (i === self.selectedIndex);
             var circleR = isSelected ? 14 : 12;
@@ -682,8 +716,12 @@ function ImagePreviewControl(parent) {
 
       if (!self.hasMoved && button === 1) {
          // Click (no movement) -> star selection
-         var imgX = (x + self.scrollX) / (self.bitmapScale * self.zoomLevel);
-         var imgY = (y + self.scrollY) / (self.bitmapScale * self.zoomLevel);
+         // Screen coords -> rotated bitmap coords -> original image coords
+         var rx = (x + self.scrollX) / self.zoomLevel;
+         var ry = (y + self.scrollY) / self.zoomLevel;
+         var imgCoord = self.displayToImage(rx, ry);
+         var imgX = imgCoord.x;
+         var imgY = imgCoord.y;
 
          if (self.onImageClick) {
             self.onImageClick(imgX, imgY);
@@ -737,6 +775,45 @@ function ImagePreviewControl(parent) {
 
 ImagePreviewControl.prototype = new ScrollBox;
 
+// Convert original image coords to rotated display bitmap coords (continuous)
+ImagePreviewControl.prototype.imageToDisplay = function (imgX, imgY) {
+   var bx = imgX * this.bitmapScale;
+   var by = imgY * this.bitmapScale;
+   var bmpW = this.bitmap.width;
+   var bmpH = this.bitmap.height;
+   switch (this.rotationAngle) {
+      case 90:  return { x: bmpH - by, y: bx };
+      case 180: return { x: bmpW - bx, y: bmpH - by };
+      case 270: return { x: by, y: bmpW - bx };
+      default:  return { x: bx, y: by };
+   }
+};
+
+// Convert rotated display bitmap coords to original image coords (continuous)
+ImagePreviewControl.prototype.displayToImage = function (rx, ry) {
+   var bx, by;
+   var bmpW = this.bitmap.width;
+   var bmpH = this.bitmap.height;
+   switch (this.rotationAngle) {
+      case 90:  bx = ry; by = bmpH - rx; break;
+      case 180: bx = bmpW - rx; by = bmpH - ry; break;
+      case 270: bx = bmpW - ry; by = rx; break;
+      default:  bx = rx; by = ry; break;
+   }
+   return { x: bx / this.bitmapScale, y: by / this.bitmapScale };
+};
+
+// Set display rotation (0, 90, 180, 270) and rebuild display bitmap
+ImagePreviewControl.prototype.setRotation = function (angle) {
+   this.rotationAngle = angle % 360;
+   if (this.bitmap) {
+      this.displayBitmap = rotateBitmap(this.bitmap, this.rotationAngle);
+      this.scrollX = 0;
+      this.scrollY = 0;
+      this.updateViewport();
+   }
+};
+
 // Clamp scroll position, sync scrollbars, and repaint
 ImagePreviewControl.prototype.setScroll = function (x, y) {
    this.scrollX = Math.max(0, Math.min(this.maxScrollX, Math.round(x)));
@@ -750,15 +827,17 @@ ImagePreviewControl.prototype.setScroll = function (x, y) {
 ImagePreviewControl.prototype.setBitmap = function (bitmapResult) {
    this.bitmap = bitmapResult.bitmap;
    this.bitmapScale = bitmapResult.scale;
+   this.displayBitmap = rotateBitmap(this.bitmap, this.rotationAngle);
    this.scrollX = 0;
    this.scrollY = 0;
    this.updateViewport();
 };
 
 ImagePreviewControl.prototype.updateViewport = function () {
-   if (!this.bitmap) return;
-   var dispW = Math.round(this.bitmap.width * this.zoomLevel);
-   var dispH = Math.round(this.bitmap.height * this.zoomLevel);
+   var dbmp = this.displayBitmap || this.bitmap;
+   if (!dbmp) return;
+   var dispW = Math.round(dbmp.width * this.zoomLevel);
+   var dispH = Math.round(dbmp.height * this.zoomLevel);
 
    // Visible area size
    var viewW = this.viewport.width;
@@ -784,15 +863,16 @@ ImagePreviewControl.prototype.updateViewport = function () {
 };
 
 ImagePreviewControl.prototype.fitToWindow = function () {
-   if (!this.bitmap) return;
+   var dbmp = this.displayBitmap || this.bitmap;
+   if (!dbmp) return;
    var viewW = this.viewport.width;
    var viewH = this.viewport.height;
    if (viewW <= 0) viewW = this.width;
    if (viewH <= 0) viewH = this.height;
    if (viewW <= 0 || viewH <= 0) return;
 
-   var zx = viewW / this.bitmap.width;
-   var zy = viewH / this.bitmap.height;
+   var zx = viewW / dbmp.width;
+   var zy = viewH / dbmp.height;
    var fitZoom = Math.min(zx, zy);
 
    this.zoomLevel = fitZoom;
@@ -1095,6 +1175,24 @@ function ManualSolverDialog(targetWindow) {
       self.preview.zoomOut();
    };
 
+   this.rotateCWButton = new PushButton(this);
+   this.rotateCWButton.text = "\u21BB"; // Clockwise arrow (U+21BB)
+   this.rotateCWButton.toolTip = "Rotate Display 90\u00B0 CW";
+   this.rotateCWButton.onClick = function () {
+      var newAngle = (self.preview.rotationAngle + 90) % 360;
+      self.preview.setRotation(newAngle);
+      self.preview.fitToWindow();
+   };
+
+   this.rotateCCWButton = new PushButton(this);
+   this.rotateCCWButton.text = "\u21BA"; // Counter-clockwise arrow (U+21BA)
+   this.rotateCCWButton.toolTip = "Rotate Display 90\u00B0 CCW";
+   this.rotateCCWButton.onClick = function () {
+      var newAngle = (self.preview.rotationAngle + 270) % 360;
+      self.preview.setRotation(newAngle);
+      self.preview.fitToWindow();
+   };
+
    var stretchLabel = new Label(this);
    stretchLabel.text = "STF:";
    stretchLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
@@ -1138,6 +1236,9 @@ function ManualSolverDialog(targetWindow) {
    toolbarSizer.add(this.zoom11Button);
    toolbarSizer.add(this.zoomInButton);
    toolbarSizer.add(this.zoomOutButton);
+   toolbarSizer.addSpacing(8);
+   toolbarSizer.add(this.rotateCCWButton);
+   toolbarSizer.add(this.rotateCWButton);
    toolbarSizer.addSpacing(12);
    toolbarSizer.add(stretchLabel);
    toolbarSizer.add(this.stretchNoneButton);
@@ -1161,26 +1262,31 @@ function ManualSolverDialog(targetWindow) {
    this.starTreeBox = new TreeBox(this);
    this.starTreeBox.alternateRowColor = true;
    this.starTreeBox.headerVisible = true;
-   this.starTreeBox.numberOfColumns = 6;
+   this.starTreeBox.headerSorting = true;
+   this.starTreeBox.numberOfColumns = 7;
    this.starTreeBox.setHeaderText(0, "#");
    this.starTreeBox.setHeaderText(1, "X");
    this.starTreeBox.setHeaderText(2, "Y");
    this.starTreeBox.setHeaderText(3, "Name");
-   this.starTreeBox.setHeaderText(4, "RA / DEC");
-   this.starTreeBox.setHeaderText(5, "Residual");
+   this.starTreeBox.setHeaderText(4, "RA");
+   this.starTreeBox.setHeaderText(5, "DEC");
+   this.starTreeBox.setHeaderText(6, "Residual");
    this.starTreeBox.setHeaderAlignment(0, TextAlign_Left | TextAlign_VertCenter);
    this.starTreeBox.setColumnWidth(0, 45);
-   this.starTreeBox.setColumnWidth(1, 70);
-   this.starTreeBox.setColumnWidth(2, 70);
-   this.starTreeBox.setColumnWidth(3, 120);
-   this.starTreeBox.setColumnWidth(4, 200);
-   this.starTreeBox.setColumnWidth(5, 80);
-   this.starTreeBox.setMinHeight(120);
+   this.starTreeBox.setColumnWidth(1, 65);
+   this.starTreeBox.setColumnWidth(2, 65);
+   this.starTreeBox.setColumnWidth(3, 110);
+   this.starTreeBox.setColumnWidth(4, 110);
+   this.starTreeBox.setColumnWidth(5, 110);
+   this.starTreeBox.setColumnWidth(6, 70);
+   this.starTreeBox.setMinHeight(150);
 
    // TreeBox selection change -> highlight marker
+   // After sorting, childIndex no longer matches starPairs index.
+   // Use the "#" column (1-based original index) to resolve.
    this.starTreeBox.onCurrentNodeUpdated = function (node) {
       if (node) {
-         self.preview.selectedIndex = self.starTreeBox.childIndex(node);
+         self.preview.selectedIndex = parseInt(node.text(0), 10) - 1;
       } else {
          self.preview.selectedIndex = -1;
       }
@@ -1189,7 +1295,7 @@ function ManualSolverDialog(targetWindow) {
 
    // TreeBox double-click -> edit
    this.starTreeBox.onNodeDoubleClicked = function (node, col) {
-      var idx = self.starTreeBox.childIndex(node);
+      var idx = parseInt(node.text(0), 10) - 1;
       if (idx >= 0 && idx < self.starPairs.length) {
          self.editStar(idx);
       }
@@ -1202,7 +1308,7 @@ function ManualSolverDialog(targetWindow) {
    this.editStarButton.onClick = function () {
       var node = self.starTreeBox.currentNode;
       if (!node) return;
-      var idx = self.starTreeBox.childIndex(node);
+      var idx = parseInt(node.text(0), 10) - 1;
       if (idx >= 0 && idx < self.starPairs.length) {
          self.editStar(idx);
       }
@@ -1214,7 +1320,7 @@ function ManualSolverDialog(targetWindow) {
    this.removeStarButton.onClick = function () {
       var node = self.starTreeBox.currentNode;
       if (!node) return;
-      var idx = self.starTreeBox.childIndex(node);
+      var idx = parseInt(node.text(0), 10) - 1;
       if (idx >= 0 && idx < self.starPairs.length) {
          self.starPairs.splice(idx, 1);
          self.wcsResult = null;
@@ -1304,13 +1410,13 @@ function ManualSolverDialog(targetWindow) {
    this.sizer.add(toolbarSizer);
    this.sizer.add(this.preview, 100);
    this.sizer.add(starTableLabel);
-   this.sizer.add(this.starTreeBox, 30);
+   this.sizer.add(this.starTreeBox, 50);
    this.sizer.add(starButtonSizer);
    this.sizer.add(this.statusLabel);
    this.sizer.addSpacing(4);
    this.sizer.add(mainButtonSizer);
 
-   this.resize(900, 700);
+   this.resize(900, 800);
 
    // Initial display: fit to window (deferred execution)
    this.onShow = function () {
@@ -1370,18 +1476,20 @@ ManualSolverDialog.prototype.refreshAll = function () {
    for (var i = 0; i < this.starPairs.length; i++) {
       var s = this.starPairs[i];
       var node = new TreeBoxNode(this.starTreeBox);
-      node.setText(0, "" + (i + 1));
+      var num = i + 1;
+      node.setText(0, (num < 10 ? "0" : "") + num);
       node.setAlignment(0, TextAlign_Left | TextAlign_VertCenter);
       node.setText(1, s.px.toFixed(1));
       node.setText(2, s.py.toFixed(1));
       node.setText(3, s.name || "");
-      node.setText(4, raToHMS(s.ra) + " / " + decToDMS(s.dec));
+      node.setText(4, raToHMS(s.ra));
+      node.setText(5, decToDMS(s.dec));
 
       // Residual
       if (this.wcsResult && this.wcsResult.residuals && this.wcsResult.residuals[i]) {
-         node.setText(5, this.wcsResult.residuals[i].residual_arcsec.toFixed(2) + "\"");
+         node.setText(6, this.wcsResult.residuals[i].residual_arcsec.toFixed(2) + "\"");
       } else {
-         node.setText(5, "");
+         node.setText(6, "");
       }
    }
 
@@ -1428,7 +1536,9 @@ ManualSolverDialog.prototype.rebuildBitmap = function () {
    console.writeln("Rebuilding bitmap (" + this.stretchMode + ")...");
    console.flush();
    var bmpResult = createStretchedBitmap(this.image, MAX_BITMAP_EDGE, this.stretchMode);
+   // setBitmap automatically applies current rotation
    this.preview.setBitmap(bmpResult);
+   this.preview.fitToWindow();
    console.writeln("  Done.");
    this.cursor = new Cursor(StdCursor_Arrow);
 };
@@ -1461,7 +1571,7 @@ ManualSolverDialog.prototype.doSolve = function () {
    console.writeln("<b>WCS Fitting Result:</b>");
    console.writeln("  RMS: " + this.wcsResult.rms_arcsec.toFixed(3) + " arcsec");
    if (this.wcsResult.sip) {
-      var modeStr = this.wcsResult.sipMode === "interp" ? " (補間)" : "";
+      var modeStr = this.wcsResult.sipMode === "interp" ? " (interp)" : "";
       console.writeln("  SIP order: " + this.wcsResult.sip.order + modeStr);
       console.writeln("  TAN-only RMS: " + this.wcsResult.rms_arcsec_tan.toFixed(3) + " arcsec");
    }
@@ -1497,7 +1607,7 @@ ManualSolverDialog.prototype.doApply = function () {
    };
    console.writeln("  Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px");
    if (this.wcsResult.sip) {
-      var modeStr2 = this.wcsResult.sipMode === "interp" ? " (補間)" : "";
+      var modeStr2 = this.wcsResult.sipMode === "interp" ? " (interp)" : "";
       console.writeln("  SIP order: " + this.wcsResult.sip.order + modeStr2);
       console.writeln("  TAN-only RMS: " + this.wcsResult.rms_arcsec_tan.toFixed(3) + " arcsec");
    }
@@ -1512,7 +1622,7 @@ ManualSolverDialog.prototype.doApply = function () {
 
    var sipInfo = "";
    if (this.wcsResult.sip) {
-      var modeLabel = this.wcsResult.sipMode === "interp" ? " (補間)" : "";
+      var modeLabel = this.wcsResult.sipMode === "interp" ? " (interp)" : "";
       sipInfo = "\nSIP order: " + this.wcsResult.sip.order + modeLabel
          + "\nTAN-only RMS: " + this.wcsResult.rms_arcsec_tan.toFixed(3) + " arcsec";
    }
@@ -1533,12 +1643,13 @@ ManualSolverDialog.prototype.doApply = function () {
 #define SETTINGS_KEY "ManualImageSolver/sessionData"
 
 // Save session data to Settings
-function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs) {
+function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, rotationAngle) {
    var data = {
       imageId: imageId,
       imageWidth: imageWidth,
       imageHeight: imageHeight,
       stretchMode: stretchMode,
+      rotationAngle: rotationAngle || 0,
       starPairs: []
    };
    for (var i = 0; i < starPairs.length; i++) {
@@ -1577,7 +1688,8 @@ ManualSolverDialog.prototype.saveSessionData = function () {
          this.image.width,
          this.image.height,
          this.stretchMode,
-         this.starPairs
+         this.starPairs,
+         this.preview.rotationAngle
       );
       console.writeln("Session data saved (" + this.starPairs.length + " stars).");
    }
@@ -1744,6 +1856,7 @@ function main() {
    // Check for session restore
    var restoredStarPairs = null;
    var restoredStretchMode = null;
+   var restoredRotationAngle = 0;
    var sessionData = loadSession();
    if (sessionData
        && sessionData.imageWidth === image.width
@@ -1756,19 +1869,23 @@ function main() {
       if (mb.execute() === StdButton_Yes) {
          restoredStarPairs = sessionData.starPairs;
          restoredStretchMode = sessionData.stretchMode || "linked";
+         restoredRotationAngle = sessionData.rotationAngle || 0;
          console.writeln("Restoring session (" + restoredStarPairs.length + " stars).");
       }
    }
 
    var dlg = new ManualSolverDialog(targetWindow);
 
-   // Session restore: apply star pairs and stretch mode
+   // Session restore: apply star pairs, stretch mode, and rotation
    if (restoredStarPairs) {
       dlg.starPairs = restoredStarPairs;
       if (restoredStretchMode && restoredStretchMode !== dlg.stretchMode) {
          dlg.stretchMode = restoredStretchMode;
          dlg.updateStretchButtons();
          dlg.rebuildBitmap();
+      }
+      if (restoredRotationAngle && restoredRotationAngle !== 0) {
+         dlg.preview.setRotation(restoredRotationAngle);
       }
       dlg.refreshAll();
    }

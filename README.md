@@ -1,6 +1,6 @@
 [日本語](README.ja.md)
 
-# Manual Image Solver v1.1.1
+# Manual Image Solver v1.2.1
 
 A manual plate solving tool for PixInsight. Manually identify stars on an image to compute and apply a TAN (gnomonic) projection WCS (World Coordinate System).
 
@@ -17,6 +17,9 @@ When automatic plate solving with astrometry.net or PixInsight's ImageSolver fai
 - **Intuitive controls**: Click to select stars, drag to pan (no mode switching needed)
 - **Stretch modes**: Switch between None / Linked / Unlinked with one click
 - **19-level zoom**: Mouse wheel (centered on cursor), Fit / 1:1 buttons, +/- buttons
+- **Display rotation**: Rotate the preview by 90°/180°/270° CW/CCW for portrait images (coordinates are handled correctly)
+- **Sortable star table**: RA and DEC in separate columns, click headers to sort — makes it easy to spot misidentified stars
+- **Circumpolar support**: 3D unit vector mean for CRVAL estimation correctly handles images including the celestial pole
 - **Session restore**: Star pair data is auto-saved and can be restored on next launch
 - **Export / Import**: Save and load star pair data as JSON files
 - **Sesame search**: Auto-resolve RA/DEC from object names via the CDS Sesame database
@@ -98,6 +101,7 @@ After WCS application, use PixInsight's **AnnotateImage** to overlay constellati
 - **Pan**: Left-button drag or middle-button drag
 - **Zoom**: Mouse wheel (centered on cursor position)
 - **Zoom buttons**: Fit (fit to window), 1:1 (actual size), + (zoom in), - (zoom out)
+- **Rotation**: ↺ / ↻ buttons to rotate the display (useful for portrait images)
 - **Stretch toggle**: STF: None / Linked / Unlinked buttons in toolbar (active mode shown with ▶ marker)
 - **Edit stars**: Double-click a table row, or select and click **Edit...**
 - **Remove stars**: Select and click **Remove**
