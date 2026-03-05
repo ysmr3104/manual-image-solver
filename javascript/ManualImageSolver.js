@@ -11,7 +11,7 @@
 // Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.1.0"
+#define VERSION "1.2.0"
 
 #include <pjsr/DataType.jsh>
 #include <pjsr/StdIcon.jsh>
@@ -22,6 +22,8 @@
 #include <pjsr/UndoFlag.jsh>
 #include <pjsr/NumericControl.jsh>
 #include <pjsr/Color.jsh>
+#include <pjsr/PropertyType.jsh>
+#include <pjsr/PropertyAttribute.jsh>
 
 #include "wcs_math.js"
 #include "wcs_keywords.js"
@@ -70,8 +72,13 @@ function decToDMS(decDeg) {
 function pixelToRaDec(wcs, px, py, imageHeight) {
    var u = (px + 1.0) - wcs.crpix1;
    var v = (imageHeight - py) - wcs.crpix2;
-   var xi  = wcs.cd1_1 * u + wcs.cd1_2 * v;
-   var eta = wcs.cd2_1 * u + wcs.cd2_2 * v;
+   var up = u, vp = v;
+   if (wcs.sip) {
+      up = u + evalSipPolynomial(wcs.sip.a, u, v);
+      vp = v + evalSipPolynomial(wcs.sip.b, u, v);
+   }
+   var xi  = wcs.cd1_1 * up + wcs.cd1_2 * vp;
+   var eta = wcs.cd2_1 * up + wcs.cd2_2 * vp;
    return tanDeproject([wcs.crval1, wcs.crval2], [xi, eta]);
 }
 
@@ -183,8 +190,9 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
          cleanedKw.push(existingKw[i]);
    }
 
-   cleanedKw.push(makeFITSKeyword("CTYPE1", "RA---TAN"));
-   cleanedKw.push(makeFITSKeyword("CTYPE2", "DEC--TAN"));
+   var hasSip = wcsResult.sip && wcsResult.sip.order > 0;
+   cleanedKw.push(makeFITSKeyword("CTYPE1", hasSip ? "RA---TAN-SIP" : "RA---TAN"));
+   cleanedKw.push(makeFITSKeyword("CTYPE2", hasSip ? "DEC--TAN-SIP" : "DEC--TAN"));
    cleanedKw.push(makeFITSKeyword("CRVAL1", wcsResult.crval1));
    cleanedKw.push(makeFITSKeyword("CRVAL2", wcsResult.crval2));
    cleanedKw.push(makeFITSKeyword("CRPIX1", wcsResult.crpix1));
@@ -199,12 +207,37 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
    cleanedKw.push(makeFITSKeyword("EQUINOX", 2000.0));
    cleanedKw.push(makeFITSKeyword("PLTSOLVD", "T"));
 
+   // SIP distortion keywords
+   if (hasSip) {
+      var sip = wcsResult.sip;
+      cleanedKw.push(makeFITSKeyword("A_ORDER", sip.order));
+      cleanedKw.push(makeFITSKeyword("B_ORDER", sip.order));
+      for (var i = 0; i < sip.a.length; i++) {
+         cleanedKw.push(makeFITSKeyword("A_" + sip.a[i][0] + "_" + sip.a[i][1], sip.a[i][2]));
+      }
+      for (var i = 0; i < sip.b.length; i++) {
+         cleanedKw.push(makeFITSKeyword("B_" + sip.b[i][0] + "_" + sip.b[i][1], sip.b[i][2]));
+      }
+      if (sip.ap && sip.bp) {
+         var apOrder = sip.invOrder || sip.order;
+         cleanedKw.push(makeFITSKeyword("AP_ORDER", apOrder));
+         cleanedKw.push(makeFITSKeyword("BP_ORDER", apOrder));
+         for (var i = 0; i < sip.ap.length; i++) {
+            cleanedKw.push(makeFITSKeyword("AP_" + sip.ap[i][0] + "_" + sip.ap[i][1], sip.ap[i][2]));
+         }
+         for (var i = 0; i < sip.bp.length; i++) {
+            cleanedKw.push(makeFITSKeyword("BP_" + sip.bp[i][0] + "_" + sip.bp[i][1], sip.bp[i][2]));
+         }
+      }
+   }
+
    // Write image center RA/DEC as OBJCTRA/OBJCTDEC
    var wcsObj = {
       crval1: wcsResult.crval1, crval2: wcsResult.crval2,
       crpix1: wcsResult.crpix1, crpix2: wcsResult.crpix2,
       cd1_1: wcsResult.cd[0][0], cd1_2: wcsResult.cd[0][1],
-      cd2_1: wcsResult.cd[1][0], cd2_2: wcsResult.cd[1][1]
+      cd2_1: wcsResult.cd[1][0], cd2_2: wcsResult.cd[1][1],
+      sip: wcsResult.sip
    };
    var imgCenter = pixelToRaDec(wcsObj, imageWidth / 2.0, imageHeight / 2.0, imageHeight);
    cleanedKw.push(makeFITSKeyword("OBJCTRA", raToHMS(imgCenter[0])));
@@ -212,6 +245,106 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
 
    targetWindow.keywords = cleanedKw;
    targetWindow.regenerateAstrometricSolution();
+}
+
+//----------------------------------------------------------------------------
+// 制御点直接設定（interp モード時の AnnotateImage 修正用）
+//
+// 広角画像で高次 SIP（補間モード）を使用すると、forward SIP 多項式が星間で
+// 暴走し、regenerateAstrometricSolution() が生成する制御点が汚染される。
+// AnnotateImage は AP/BP（逆SIP）を使わず制御点ベースの RBF スプラインで
+// sky→pixel 変換するため、汚染された制御点 → 注釈位置のズレが発生する。
+//
+// 解決策: CD 行列の線形マッピングからグリッド制御点を生成し、既知の星位置に
+// 高重みの制御点を追加して、RBF スプラインが星位置では正確に、間は滑らかに
+// 補間するようにする。
+//----------------------------------------------------------------------------
+function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageHeight) {
+   // interp モード以外では不要（approx モードの forward SIP は滑らか）
+   if (!wcsResult.sipMode || wcsResult.sipMode !== "interp") return;
+
+   var view = window.mainView;
+   var crval = [wcsResult.crval1, wcsResult.crval2];
+   var cd = wcsResult.cd;
+   var crpix1 = wcsResult.crpix1;
+   var crpix2 = wcsResult.crpix2;
+
+   // 1. グリッド制御点: CD行列（線形マッピング）から生成
+   var STAR_EXCLUSION_RADIUS = 100; // 星付近のグリッド点を除外（px）
+   var nGridX = 20, nGridY = 30;
+   var gridPoints = [];
+   for (var gy = 0; gy <= nGridY; gy++) {
+      for (var gx = 0; gx <= nGridX; gx++) {
+         var px = gx * (imageWidth - 1) / nGridX;
+         var py = gy * (imageHeight - 1) / nGridY;
+         // 星に近すぎるグリッド点を除外（CD線形値と星の正確な値の矛盾を回避）
+         var tooClose = false;
+         for (var s = 0; s < starPairs.length; s++) {
+            var dx = px - starPairs[s].px;
+            var dy = py - starPairs[s].py;
+            if (dx * dx + dy * dy < STAR_EXCLUSION_RADIUS * STAR_EXCLUSION_RADIUS) {
+               tooClose = true;
+               break;
+            }
+         }
+         if (tooClose) continue;
+         // FITS座標系に変換
+         var u = (px + 1) - crpix1;
+         var v = (imageHeight - py) - crpix2;
+         // CD行列による線形マッピング → gnomonic座標（度）
+         var xi = cd[0][0] * u + cd[0][1] * v;
+         var eta = cd[1][0] * u + cd[1][1] * v;
+         gridPoints.push({ px: px, py: py, xi: xi, eta: eta });
+      }
+   }
+
+   // 2. 星制御点: 正確な RA/Dec → TAN投影
+   var starPoints = [];
+   for (var i = 0; i < starPairs.length; i++) {
+      var proj = tanProject(crval, [starPairs[i].ra, starPairs[i].dec]);
+      if (proj) {
+         starPoints.push({
+            px: starPairs[i].px, py: starPairs[i].py,
+            xi: proj[0], eta: proj[1]
+         });
+      }
+   }
+
+   // 3. Vector に変換（cI: Image座標, cW: World座標）
+   var nTotal = gridPoints.length + starPoints.length;
+   var cI = new Vector(nTotal * 2);
+   var cW = new Vector(nTotal * 2);
+
+   // グリッド点（PixInsight 0-based 座標）
+   for (var i = 0; i < gridPoints.length; i++) {
+      cI.at(i * 2,     gridPoints[i].px);
+      cI.at(i * 2 + 1, gridPoints[i].py);
+      cW.at(i * 2,     gridPoints[i].xi);
+      cW.at(i * 2 + 1, gridPoints[i].eta);
+   }
+
+   // 星点
+   var off = gridPoints.length;
+   for (var i = 0; i < starPoints.length; i++) {
+      cI.at((off + i) * 2,     starPoints[i].px);
+      cI.at((off + i) * 2 + 1, starPoints[i].py);
+      cW.at((off + i) * 2,     starPoints[i].xi);
+      cW.at((off + i) * 2 + 1, starPoints[i].eta);
+   }
+
+   // 4. 画像プロパティに書き込み（全スプライン設定を完全に上書き）
+   var attrs = PropertyAttribute_Storable | PropertyAttribute_Permanent;
+   var prefix = "PCL:AstrometricSolution:SplineWorldTransformation:";
+   view.setPropertyValue(prefix + "RBFType", "ThinPlateSpline", PropertyType_String8, attrs);
+   view.setPropertyValue(prefix + "SplineOrder", 2, PropertyType_Int32, attrs);
+   view.setPropertyValue(prefix + "SplineSmoothness", 0, PropertyType_Float32, attrs);
+   view.setPropertyValue(prefix + "MaxSplinePoints", nTotal, PropertyType_Int32, attrs);
+   view.setPropertyValue(prefix + "UseSimplifiers", false, PropertyType_Boolean, attrs);
+   view.setPropertyValue(prefix + "SimplifierRejectFraction", 0.10, PropertyType_Float32, attrs);
+   view.setPropertyValue(prefix + "ControlPoints:Image", cI, PropertyType_F64Vector, attrs);
+   view.setPropertyValue(prefix + "ControlPoints:World", cW, PropertyType_F64Vector, attrs);
+
+   console.writeln("  Control points overwritten: grid " + gridPoints.length + " + stars " + starPoints.length + " = " + nTotal + " points");
 }
 
 //============================================================================
@@ -1267,8 +1400,11 @@ ManualSolverDialog.prototype.refreshAll = function () {
    var nStars = this.starPairs.length;
    var statusText = nStars + " star" + (nStars !== 1 ? "s" : "") + " registered";
    if (this.wcsResult && this.wcsResult.success) {
-      statusText += " | RMS " + this.wcsResult.rms_arcsec.toFixed(2) + "\""
-         + " | Scale " + this.wcsResult.pixelScale_arcsec.toFixed(2) + "\"/px";
+      statusText += " | RMS " + this.wcsResult.rms_arcsec.toFixed(2) + "\"";
+      if (this.wcsResult.sip) {
+         statusText += " (SIP" + this.wcsResult.sip.order + (this.wcsResult.sipMode === "interp" ? "i" : "") + ")";
+      }
+      statusText += " | Scale " + this.wcsResult.pixelScale_arcsec.toFixed(2) + "\"/px";
    }
    this.statusLabel.text = statusText;
 
@@ -1324,6 +1460,11 @@ ManualSolverDialog.prototype.doSolve = function () {
    console.writeln("");
    console.writeln("<b>WCS Fitting Result:</b>");
    console.writeln("  RMS: " + this.wcsResult.rms_arcsec.toFixed(3) + " arcsec");
+   if (this.wcsResult.sip) {
+      var modeStr = this.wcsResult.sipMode === "interp" ? " (補間)" : "";
+      console.writeln("  SIP order: " + this.wcsResult.sip.order + modeStr);
+      console.writeln("  TAN-only RMS: " + this.wcsResult.rms_arcsec_tan.toFixed(3) + " arcsec");
+   }
    console.writeln("  Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px");
    console.writeln("  Stars: " + this.starPairs.length);
 
@@ -1342,14 +1483,24 @@ ManualSolverDialog.prototype.doApply = function () {
 
    applyWCSToImage(this.targetWindow, this.wcsResult, this.image.width, this.image.height);
 
+   // interp モード時に制御点を上書き（AnnotateImage の注釈位置ズレ修正）
+   setCustomControlPoints(this.targetWindow, this.wcsResult,
+      this.starPairs, this.image.width, this.image.height);
+
    // Console output
    var wcsObj = {
       crval1: this.wcsResult.crval1, crval2: this.wcsResult.crval2,
       crpix1: this.wcsResult.crpix1, crpix2: this.wcsResult.crpix2,
       cd1_1: this.wcsResult.cd[0][0], cd1_2: this.wcsResult.cd[0][1],
-      cd2_1: this.wcsResult.cd[1][0], cd2_2: this.wcsResult.cd[1][1]
+      cd2_1: this.wcsResult.cd[1][0], cd2_2: this.wcsResult.cd[1][1],
+      sip: this.wcsResult.sip
    };
    console.writeln("  Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px");
+   if (this.wcsResult.sip) {
+      var modeStr2 = this.wcsResult.sipMode === "interp" ? " (補間)" : "";
+      console.writeln("  SIP order: " + this.wcsResult.sip.order + modeStr2);
+      console.writeln("  TAN-only RMS: " + this.wcsResult.rms_arcsec_tan.toFixed(3) + " arcsec");
+   }
    displayStarPairs(this.starPairs, this.wcsResult.residuals);
    displayImageCoordinates(wcsObj, this.image.width, this.image.height);
 
@@ -1359,11 +1510,18 @@ ManualSolverDialog.prototype.doApply = function () {
    // Save session on successful Apply
    this.saveSessionData();
 
+   var sipInfo = "";
+   if (this.wcsResult.sip) {
+      var modeLabel = this.wcsResult.sipMode === "interp" ? " (補間)" : "";
+      sipInfo = "\nSIP order: " + this.wcsResult.sip.order + modeLabel
+         + "\nTAN-only RMS: " + this.wcsResult.rms_arcsec_tan.toFixed(3) + " arcsec";
+   }
    var mb = new MessageBox(
       "WCS applied successfully.\n\n"
       + "RMS: " + this.wcsResult.rms_arcsec.toFixed(3) + " arcsec\n"
       + "Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px\n"
-      + "Stars: " + this.starPairs.length,
+      + "Stars: " + this.starPairs.length
+      + sipInfo,
       TITLE, StdIcon_Information, StdButton_Ok);
    mb.execute();
 };

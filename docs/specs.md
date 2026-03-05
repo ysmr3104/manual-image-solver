@@ -154,7 +154,7 @@ Haversine 公式より数値的に安定。
 
 ```
 +====================================================+
-| Manual Image Solver                       v1.1.0   |
+| Manual Image Solver                       v1.2.0   |
 +----------------------------------------------------+
 | Image: [active_image ▼]  (6024 x 4024 px)         |
 +----------------------------------------------------+
@@ -231,6 +231,7 @@ Haversine 公式より数値的に安定。
 1. 既存の WCS 関連キーワードを全て除去（`isWCSKeyword()` で判定）
 2. 新しい WCS キーワードを追加（`makeFITSKeyword()` で型を自動判定）
 3. `window.regenerateAstrometricSolution()` でアストロメトリック表示を再生成
+4. 補間モード時: `setCustomControlPoints()` で制御点を直接上書き（§7.7 参照）
 
 ## 6. 天体名検索（CDS Sesame）
 
@@ -239,16 +240,69 @@ Haversine 公式より数値的に安定。
 - レスポンスの `%J` 行から RA/DEC（度数）を抽出
 - オフライン時は RA/DEC 直接入力で対応
 
-## 7. 将来の拡張（Phase 3）
+## 7. SIP 歪み補正（Phase 3 実装済み）
 
-### SIP 歪み補正
+### 7.1 概要
 
-- 多項式項 u^p × v^q (p+q ≥ 2) を追加
-- SIP 次数 2: 3項追加 → 3×3 正規方程式
-- SIP 次数 3: 7項追加 → 7×7 正規方程式
-- ガウス消去法で解く（PJSR に Matrix クラスがないため自前実装）
+SIP（Simple Imaging Polynomial）は TAN 投影の残差を高次多項式で補正する FITS 標準拡張。広角画像（FOV > 数度）で CD 行列のみでは吸収できない非線形歪みを補正する。
 
-### 精度の限界
+### 7.2 SIP 多項式
+
+ピクセルオフセット (u, v) = (x - CRPIX1, y - CRPIX2) に対し:
+
+```
+u' = u + A(u, v) = u + Σ A_p_q × u^p × v^q  (p+q = 2..A_ORDER)
+v' = v + B(u, v) = v + Σ B_p_q × u^p × v^q  (p+q = 2..B_ORDER)
+```
+
+補正後の (u', v') に CD 行列を適用して標準座標 (ξ, η) を得る:
+```
+ξ  = CD1_1 × u' + CD1_2 × v'
+η  = CD2_1 × u' + CD2_2 × v'
+```
+
+### 7.3 SIP 次数の決定
+
+手動プレートソルブでは星数が限られるため、過剰フィットを避ける保守的な閾値:
+
+| 星数 | SIP 次数 | 多項式項数（各軸） | 必要最小自由度 |
+|---|---|---|---|
+| < 6 | 0（SIP なし） | — | — |
+| 6〜9 | 2 | 3 | 3 |
+| ≥ 10 | 3 | 7 | 3 |
+
+### 7.4 フィッティングアルゴリズム
+
+1. **TAN-only フィット**: 従来の CD 行列 + CRVAL 反復フィット（§2.2〜2.3）
+2. **反復 CD+SIP 精密化**（最大 10 回）:
+   a. CD 逆行列で天球座標→理想ピクセルを計算し、実測ピクセルとの差を SIP ターゲットとする
+   b. 座標正規化（`coordScale = max(|u|, |v|)`）で数値安定化
+   c. 設計行列 `u^p × v^q` (p+q = 2..N) の各項を構築
+   d. 正規方程式 (M^T M) x = M^T b をガウス消去法（部分ピボット付き）で解く
+   e. SIP 補正済みピクセル座標で CD 行列と CRVAL を再フィット
+3. **採用判定**: SIP 後の RMS が TAN-only RMS より 5% 以上改善 **かつ** 絶対改善量 > 0.1 arcsec の場合のみ採用。それ以外は TAN-only にフォールバック
+4. **逆 SIP 計算**: 50×50 グリッドで順 SIP を評価し、逆方向の多項式 (AP, BP) を最小二乗法で計算
+
+### 7.5 FITS キーワード
+
+SIP 適用時に追加されるキーワード:
+
+| キーワード | 型 | 値 |
+|---|---|---|
+| CTYPE1 | 文字列 | `RA---TAN-SIP` |
+| CTYPE2 | 文字列 | `DEC--TAN-SIP` |
+| A_ORDER | 整数 | SIP 次数 (2 or 3) |
+| B_ORDER | 整数 | SIP 次数 (2 or 3) |
+| A_p_q | 浮動小数点 | 順方向 SIP 係数 |
+| B_p_q | 浮動小数点 | 順方向 SIP 係数 |
+| AP_ORDER | 整数 | 逆 SIP 次数 |
+| BP_ORDER | 整数 | 逆 SIP 次数 |
+| AP_p_q | 浮動小数点 | 逆方向 SIP 係数 |
+| BP_p_q | 浮動小数点 | 逆方向 SIP 係数 |
+
+SIP 非適用時は従来通り `RA---TAN` / `DEC--TAN` を使用。
+
+### 7.6 精度の目安
 
 | 状況 | 予想精度 |
 |---|---|
@@ -256,6 +310,139 @@ Haversine 公式より数値的に安定。
 | 中角（5°〜30°）, TAN のみ | 1〜10 arcsec |
 | 広角（> 30°）, TAN + SIP | 1〜5 arcsec |
 | 広角（> 30°）, TAN のみ | > 10 arcsec（歪みが残る） |
+
+### 7.7 補間モード（広角画像対応）
+
+#### 背景
+
+TAN 投影は FOV が 90° に近づくと発散するため、通常の SIP 多項式（最小二乗近似、最大次数 3）では広角画像の歪みを補正しきれない。ユーザーの要望「座標指定している部分を完全に固定した状態でそれ以外の箇所を近似させる」に対応するため、補間モードを導入。
+
+#### 原理
+
+SIP の項数を星数以上に設定し、劣決定系の最小ノルム解を使用することで、全制御点を正確に通る補間を実現する。
+
+- **近似モード（approx）**: 項数 ≤ 星数。正規方程式 (M^T M)x = M^T b の最小二乗解。星の位置では残差が残る
+- **補間モード（interp）**: 項数 > 星数。設計行列 D の最小ノルム解 x = D^T (D D^T)^{-1} b。指定した星の位置で残差 ≈ 0
+
+#### モード自動判定
+
+TAN-only フィットの RMS がピクセルスケールの 5 倍以上の場合に補間モードを自動選択:
+
+```
+tanRmsPixel = tanRmsArcsec / pixelScaleArcsec
+sipMode = (tanRmsPixel >= 5.0) ? "interp" : "approx"
+```
+
+#### 補間モードの SIP 次数
+
+| 星数 | SIP 次数 | 多項式項数 | 自由度（項数 − 星数） |
+|---|---|---|---|
+| ≤ 3 | 0（SIP なし） | — | — |
+| 4〜7 | 3 | 7 | 0〜3 |
+| 8〜12 | 4 | 12 | 0〜4 |
+| 13〜18 | 5 | 18 | 0〜5 |
+| 19〜25 | 6 | 25 | 0〜6 |
+| ≥ 26 | 7 | 33 | 7+ |
+
+#### 最小ノルム解
+
+劣決定系 Dx = b（m < n）の最小ノルム解:
+
+```
+x = D^T * (D * D^T)^{-1} * b
+```
+
+G = D D^T（m×m）を計算し、Gy = b をガウス消去法で解き、x = D^T y を求める。数値安定性のため、G が特異に近い場合は Tikhonov 正則化（G + εI, ε = max(diag(G)) × 10^{-10}）をフォールバックとして適用。
+
+#### P-norm 境界エネルギー抑制（外挿暴走防止）
+
+補間モードでは高次多項式を少数の星で厳密に補間するため、星がカバーしていない画像端で多項式が暴走する（Runge 現象）。これにより FOV が異常値（例: 178°）になり、逆 SIP（AP, BP）も壊れる。
+
+**解決策**: P-norm 最小化 + 複合アンカーポイント。星での厳密補間を保ちつつ、画像全域での多項式エネルギーを最小化する。
+
+1. **SIP 次数の決定**: 境界エネルギー抑制に十分な自由度を確保
+   - 目標: 自由度（= 項数 − 星数）≥ 25
+   - 次数 K → 項数 = (K+1)(K+2)/2 − 3
+   - 例: 10星 → 次数 8（42項, 自由度 32）
+
+2. **複合アンカーポイント**: 境界 + グリッドの2層構造
+   - **境界アンカー**（36点, 重み W=10）: 各辺10点。FOV を正確に制御
+   - **グリッドアンカー**（49点, 重み W=1）: 7×7 内部格子。内部振動を抑制
+   - 各点のターゲット: du = dv = 0（SIP 補正なし = TAN 投影に漸近）
+
+3. **P-norm 最小化**: x = P^{-1} D^T (D P^{-1} D^T)^{-1} b
+   - P = M_anchor^T W M_anchor + εI（重み付きアンカーエネルギー行列）
+   - D = 星位置での基底関数行列
+   - b = 星での SIP 補正量（厳密制約）
+   - 正則化: ε = max(diag(P)) × 10^{-10}
+   - 星での補間は厳密（残差 = 0）、自由度はアンカーエネルギー最小化に使用
+
+4. **効果**:
+   - 星の残差は厳密ゼロ（P-norm は制約付き最適化）
+   - 画像四隅の SIP 補正量を ~100 px 以内に抑制（例: 90° FOV で最大 131 px）
+   - FOV 表示が正確（例: 89° × 40°, 暴走前は 178° と誤表示）
+
+5. **逆 SIP 直接計算**（補間モード）:
+   - forward SIP の多項式振動（Runge 現象）を回避するため、星の正確な位置データから直接計算
+   - 各星: (RA, Dec) → TAN 投影 → CD⁻¹ → (u', v') → 補正量 = (u−u', v−v')
+   - 線形項（order 1: AP_1_0, AP_0_1 等）を基底に含めることで CRVAL 近傍での感度を改善
+   - P-norm 方式: 星位置（W=10⁶）で正確に補間しつつ、摂動アンカー（W=1）で滑らかさを保証
+   - 逆 SIP 次数: nBasis ≥ nStars + 5 を満たす最小次数（通常 order 4-6）
+   - 効果: 90° FOV でも逆 SIP MAX < 10 px（改善前: ~1800 px）
+   - 狭角～中角画像の近似モードでは従来のグリッドベース逆 SIP を使用
+
+#### 受理条件
+
+- **補間モード**: 数値的に解けていれば常に採用（閾値なし）
+- **近似モード**: 従来通り、TAN-only RMS の 5% 以上改善かつ絶対改善量 > 0.1 arcsec
+
+#### 表示
+
+- コンソール: `SIP order: N (補間)` と表示
+- ステータス: `(SIPNi)` と表示（i = interpolation）
+- 結果オブジェクトに `sipMode: "interp"` or `"approx"` を追加
+
+#### 制御点直接設定（AnnotateImage 修正）
+
+##### 問題
+
+広角画像（90° FOV 等）で補間モード（高次 SIP）を使用すると、forward SIP 多項式が制御点間で暴走する（Runge 現象）。`regenerateAstrometricSolution()` がこの暴走した forward SIP をグリッドサンプリングして制御点を生成するため、制御点が汚染される。AnnotateImage は AP/BP（逆 SIP）を使わず、制御点から構築した RBF スプラインで sky→pixel 変換するため、汚染された制御点により注釈位置がずれる。
+
+##### 解決策
+
+`regenerateAstrometricSolution()` 後に、画像プロパティのスプライン設定と制御点を完全に上書きする:
+
+1. **グリッド制御点**（21×31 格子, 最大 651 点）: CD 行列の線形マッピングから生成。画像全域での滑らかなベースラインを提供。星位置から半径 100px 以内のグリッド点は除外（CD 線形値と星の正確な TAN 投影値の矛盾を回避）
+2. **星制御点**（星数分）: 正確な RA/Dec → TAN 投影で gnomonic 座標を計算。既知位置での正確な対応を保証
+
+RBF スプライン（Thin Plate Spline）は多項式と異なり Runge 振動を起こさないため、星位置では正確な注釈位置を実現し、離れた場所では CD 線形ベースラインに沿って滑らかに補間する。
+
+##### 書き込み先プロパティ
+
+スプライン設定プロパティ（`regenerateAstrometricSolution()` が生成した値を完全に上書き）:
+
+| プロパティキー | 型 | 値 |
+|---|---|---|
+| `...:SplineWorldTransformation:RBFType` | String8 | `ThinPlateSpline` |
+| `...:SplineWorldTransformation:SplineOrder` | Int32 | `2` |
+| `...:SplineWorldTransformation:SplineSmoothness` | Float32 | `0`（厳密補間） |
+| `...:SplineWorldTransformation:MaxSplinePoints` | Int32 | 制御点の総数 |
+| `...:SplineWorldTransformation:UseSimplifiers` | Boolean | `false` |
+| `...:SplineWorldTransformation:SimplifierRejectFraction` | Float32 | `0.10` |
+
+制御点プロパティ（プレフィックス: `PCL:AstrometricSolution:`）:
+
+| プロパティキー | 型 | 内容 |
+|---|---|---|
+| `...:SplineWorldTransformation:ControlPoints:Image` | F64Vector | PixInsight 0-based 座標 (px, py) × N 点（インターリーブ） |
+| `...:SplineWorldTransformation:ControlPoints:World` | F64Vector | gnomonic 投影座標 (ξ, η) in degrees × N 点（インターリーブ） |
+
+**注意**: `ControlPoints:Weights` は PixInsight の SplineWorldTransformation の公式プロパティに存在しない。書き込むとバリデーションエラー（`invalid or corrupted control point structures`）が発生する。
+
+##### 適用条件
+
+- 補間モード（`sipMode === "interp"`）の場合のみ適用
+- 近似モードでは forward SIP が滑らかであり、`regenerateAstrometricSolution()` の制御点がそのまま使える
 
 ## 8. プロジェクト構成
 
