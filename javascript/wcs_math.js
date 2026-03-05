@@ -284,6 +284,56 @@ function solveMinNorm(D, b) {
    return x;
 }
 
+// Fit 2D polynomial to residuals: target = sum of coeff * u^p * v^q (2 <= p+q <= order)
+// Returns array of [p, q, coeff] (same format as SIP), or null if insufficient data
+function fitPolynomial2D(uArr, vArr, targetArr, order) {
+   if (!order || order < 2) order = 2;
+   // Build basis: u^p * v^q for 2 <= p+q <= order
+   var basis = [];
+   for (var deg = 2; deg <= order; deg++) {
+      for (var p = deg; p >= 0; p--) {
+         var q = deg - p;
+         basis.push([p, q]);
+      }
+   }
+   var nTerms = basis.length;
+   var nData = uArr.length;
+   if (nData < nTerms) return null;
+
+   // Build design matrix M (nData x nTerms)
+   var M = [];
+   for (var i = 0; i < nData; i++) {
+      M[i] = [];
+      for (var j = 0; j < nTerms; j++) {
+         M[i][j] = Math.pow(uArr[i], basis[j][0]) * Math.pow(vArr[i], basis[j][1]);
+      }
+   }
+
+   // Normal equations: (M^T M) x = M^T b
+   var MtM = [];
+   var Mtb = [];
+   for (var j = 0; j < nTerms; j++) {
+      MtM[j] = [];
+      var s = 0;
+      for (var i = 0; i < nData; i++) s += M[i][j] * targetArr[i];
+      Mtb[j] = s;
+      for (var k = 0; k < nTerms; k++) {
+         var ss = 0;
+         for (var i = 0; i < nData; i++) ss += M[i][j] * M[i][k];
+         MtM[j][k] = ss;
+      }
+   }
+
+   var coeffs = solveLinearSystem(MtM, Mtb);
+   if (!coeffs) return null;
+
+   var result = [];
+   for (var j = 0; j < nTerms; j++) {
+      result.push([basis[j][0], basis[j][1], coeffs[j]]);
+   }
+   return result;
+}
+
 // Evaluate SIP polynomial: sum of coeff * u^p * v^q
 // sipCoeffs: array of [p, q, value]
 function evalSipPolynomial(sipCoeffs, u, v) {
@@ -1287,6 +1337,7 @@ if (typeof module !== "undefined") {
       angularSeparation: angularSeparation,
       solveLinearSystem: solveLinearSystem,
       solveMinNorm: solveMinNorm,
+      fitPolynomial2D: fitPolynomial2D,
       evalSipPolynomial: evalSipPolynomial,
       determineSipOrder: determineSipOrder,
       WCSFitter: WCSFitter,

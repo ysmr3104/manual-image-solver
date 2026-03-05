@@ -13,6 +13,7 @@ var solveLinearSystem = wcs.solveLinearSystem;
 var solveMinNorm = wcs.solveMinNorm;
 var evalSipPolynomial = wcs.evalSipPolynomial;
 var determineSipOrder = wcs.determineSipOrder;
+var fitPolynomial2D = wcs.fitPolynomial2D;
 var WCSFitter = wcs.WCSFitter;
 
 var passed = 0;
@@ -1279,6 +1280,75 @@ test("WCSFitter: 広角90° FOV 実データで逆SIP(sky→pixel)が正確", fu
    assertTrue(maxInvErr < 50,
       "逆SIP MAX < 50 px (実際: " + maxInvErr.toFixed(1) + " px)");
 });
+
+//============================================================================
+// fitPolynomial2D テスト
+//============================================================================
+
+(function () {
+   testName = "fitPolynomial2D: order 2 の既知多項式フィット";
+
+   // f(u,v) = 3*u^2 - 2*u*v + v^2
+   var uArr = [], vArr = [], tArr = [];
+   for (var i = 0; i < 10; i++) {
+      var u = (i - 5) * 0.1;
+      var v = (i - 3) * 0.15;
+      uArr.push(u);
+      vArr.push(v);
+      tArr.push(3 * u * u - 2 * u * v + v * v);
+   }
+
+   var result = fitPolynomial2D(uArr, vArr, tArr, 2);
+   assertTrue(result !== null, "result should not be null");
+   assertEqual(result.length, 3, "order 2 should have 3 terms");
+
+   // 係数を辞書的に取得
+   var coeffMap = {};
+   for (var i = 0; i < result.length; i++) {
+      coeffMap[result[i][0] + "," + result[i][1]] = result[i][2];
+   }
+   assertEqual(coeffMap["2,0"], 3.0, "u^2 coeff = 3", 1e-10);
+   assertEqual(coeffMap["1,1"], -2.0, "uv coeff = -2", 1e-10);
+   assertEqual(coeffMap["0,2"], 1.0, "v^2 coeff = 1", 1e-10);
+})();
+
+(function () {
+   testName = "fitPolynomial2D: order 3 フィット";
+
+   // f(u,v) = u^2 + 0.5*u^3 - 0.3*u*v^2
+   // 2Dグリッドでデータ生成（線形依存を回避）
+   var uArr = [], vArr = [], tArr = [];
+   for (var iy = 0; iy < 5; iy++) {
+      for (var ix = 0; ix < 5; ix++) {
+         var u = (ix - 2) * 0.1;
+         var v = (iy - 2) * 0.1;
+         uArr.push(u);
+         vArr.push(v);
+         tArr.push(u * u + 0.5 * u * u * u - 0.3 * u * v * v);
+      }
+   }
+
+   var result = fitPolynomial2D(uArr, vArr, tArr, 3);
+   assertTrue(result !== null, "result should not be null");
+   assertEqual(result.length, 7, "order 3 should have 7 terms");
+
+   var coeffMap = {};
+   for (var i = 0; i < result.length; i++) {
+      coeffMap[result[i][0] + "," + result[i][1]] = result[i][2];
+   }
+   assertEqual(coeffMap["2,0"], 1.0, "u^2 coeff = 1", 1e-8);
+   assertEqual(coeffMap["3,0"], 0.5, "u^3 coeff = 0.5", 1e-8);
+   assertEqual(coeffMap["1,2"], -0.3, "uv^2 coeff = -0.3", 1e-8);
+   assertEqual(coeffMap["1,1"], 0.0, "uv coeff = 0", 1e-8);
+   assertEqual(coeffMap["0,2"], 0.0, "v^2 coeff = 0", 1e-8);
+})();
+
+(function () {
+   testName = "fitPolynomial2D: 星数不足で null";
+
+   var result = fitPolynomial2D([0.1, 0.2], [0.3, 0.4], [0.01, 0.02], 2);
+   assertTrue(result === null, "should return null when nData < nTerms");
+})();
 
 //============================================================================
 // 結果サマリー

@@ -259,54 +259,162 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
 // 高重みの制御点を追加して、RBF スプラインが星位置では正確に、間は滑らかに
 // 補間するようにする。
 //----------------------------------------------------------------------------
-function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageHeight) {
+function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageHeight, gridMode) {
    // interp モード以外では不要（approx モードの forward SIP は滑らか）
    if (!wcsResult.sipMode || wcsResult.sipMode !== "interp") return;
+   if (!gridMode) gridMode = "off";
 
    var view = window.mainView;
    var crval = [wcsResult.crval1, wcsResult.crval2];
    var cd = wcsResult.cd;
    var crpix1 = wcsResult.crpix1;
    var crpix2 = wcsResult.crpix2;
+   var DEG2RAD = Math.PI / 180.0;
 
-   // 1. グリッド制御点: CD行列（線形マッピング）から生成
-   var STAR_EXCLUSION_RADIUS = 100; // 星付近のグリッド点を除外（px）
-   var nGridX = 20, nGridY = 30;
+   // Grid mode:
+   //   "off"    - grid=CD-linear (star exclusion), stars=exact tanProject
+   //   "smooth" - grid/stars=CD-linear + IDW correction (exact near stars, CD-linear far)
+   //   "linear" - grid/stars=all CD-linear (perfect grid geometry, shifted stars)
+
+   // Pre-compute star 3D residuals for "smooth" mode (IDW interpolation)
+   var starResiduals = null;
+   if (gridMode === "smooth" && starPairs.length >= 3) {
+      starResiduals = [];
+      for (var i = 0; i < starPairs.length; i++) {
+         var u = (starPairs[i].px + 1) - crpix1;
+         var v = (imageHeight - starPairs[i].py) - crpix2;
+         var xiLin = cd[0][0] * u + cd[0][1] * v;
+         var etaLin = cd[1][0] * u + cd[1][1] * v;
+         var approx = tanDeproject(crval, [xiLin, etaLin]);
+         if (!approx) continue;
+         var raA = approx[0] * DEG2RAD, decA = approx[1] * DEG2RAD;
+         var xLin = Math.cos(decA) * Math.cos(raA);
+         var yLin = Math.cos(decA) * Math.sin(raA);
+         var zLin = Math.sin(decA);
+         var raE = starPairs[i].ra * DEG2RAD, decE = starPairs[i].dec * DEG2RAD;
+         var xEx = Math.cos(decE) * Math.cos(raE);
+         var yEx = Math.cos(decE) * Math.sin(raE);
+         var zEx = Math.sin(decE);
+         starResiduals.push({
+            u: u, v: v,
+            dx: xEx - xLin, dy: yEx - yLin, dz: zEx - zLin
+         });
+      }
+      if (starResiduals.length < 3) starResiduals = null;
+   }
+
+   // IDW sigma: average nearest-neighbor distance among stars
+   var sigma2 = 0;
+   if (starResiduals) {
+      var totalNN = 0;
+      for (var i = 0; i < starResiduals.length; i++) {
+         var minD2 = Infinity;
+         for (var j = 0; j < starResiduals.length; j++) {
+            if (i === j) continue;
+            var du = starResiduals[i].u - starResiduals[j].u;
+            var dv = starResiduals[i].v - starResiduals[j].v;
+            var d2 = du * du + dv * dv;
+            if (d2 < minD2) minD2 = d2;
+         }
+         totalNN += Math.sqrt(minD2);
+      }
+      var avgNN = totalNN / starResiduals.length;
+      sigma2 = avgNN * avgNN;
+   }
+
+   // Compute gnomonic coords for a pixel using IDW-corrected 3D vectors + tanProject
+   function smoothGnomonic(u, v) {
+      var xiLin = cd[0][0] * u + cd[0][1] * v;
+      var etaLin = cd[1][0] * u + cd[1][1] * v;
+      var approx = tanDeproject(crval, [xiLin, etaLin]);
+      if (!approx) return { xi: xiLin, eta: etaLin };
+      var raA = approx[0] * DEG2RAD, decA = approx[1] * DEG2RAD;
+      var xBase = Math.cos(decA) * Math.cos(raA);
+      var yBase = Math.cos(decA) * Math.sin(raA);
+      var zBase = Math.sin(decA);
+      // IDW: Gaussian-weighted sum of star residuals
+      var wSum = 0, wdx = 0, wdy = 0, wdz = 0;
+      for (var i = 0; i < starResiduals.length; i++) {
+         var du = u - starResiduals[i].u;
+         var dv = v - starResiduals[i].v;
+         var w = Math.exp(-(du * du + dv * dv) / (2 * sigma2));
+         wSum += w;
+         wdx += w * starResiduals[i].dx;
+         wdy += w * starResiduals[i].dy;
+         wdz += w * starResiduals[i].dz;
+      }
+      if (wSum > 1e-15) {
+         xBase += wdx / wSum;
+         yBase += wdy / wSum;
+         zBase += wdz / wSum;
+      }
+      var r = Math.sqrt(xBase * xBase + yBase * yBase + zBase * zBase);
+      if (r < 1e-15) return { xi: xiLin, eta: etaLin };
+      xBase /= r; yBase /= r; zBase /= r;
+      var dec = Math.asin(Math.max(-1, Math.min(1, zBase)));
+      var ra = Math.atan2(yBase, xBase);
+      if (ra < 0) ra += 2 * Math.PI;
+      var proj = tanProject(crval, [ra / DEG2RAD, dec / DEG2RAD]);
+      return proj ? { xi: proj[0], eta: proj[1] } : { xi: xiLin, eta: etaLin };
+   }
+
+   // 1. グリッド制御点
+   var STAR_EXCLUSION_RADIUS = 100;
+   var nGridX = (gridMode === "off") ? 20 : (gridMode === "smooth" ? 20 : 4);
+   var nGridY = (gridMode === "off") ? 30 : (gridMode === "smooth" ? 30 : 4);
    var gridPoints = [];
    for (var gy = 0; gy <= nGridY; gy++) {
       for (var gx = 0; gx <= nGridX; gx++) {
          var px = gx * (imageWidth - 1) / nGridX;
          var py = gy * (imageHeight - 1) / nGridY;
-         // 星に近すぎるグリッド点を除外（CD線形値と星の正確な値の矛盾を回避）
-         var tooClose = false;
-         for (var s = 0; s < starPairs.length; s++) {
-            var dx = px - starPairs[s].px;
-            var dy = py - starPairs[s].py;
-            if (dx * dx + dy * dy < STAR_EXCLUSION_RADIUS * STAR_EXCLUSION_RADIUS) {
-               tooClose = true;
-               break;
-            }
-         }
-         if (tooClose) continue;
-         // FITS座標系に変換
          var u = (px + 1) - crpix1;
          var v = (imageHeight - py) - crpix2;
-         // CD行列による線形マッピング → gnomonic座標（度）
-         var xi = cd[0][0] * u + cd[0][1] * v;
-         var eta = cd[1][0] * u + cd[1][1] * v;
-         gridPoints.push({ px: px, py: py, xi: xi, eta: eta });
+         if (gridMode === "off") {
+            // 星に近すぎるグリッド点を除外（CD線形値と星の正確な値の矛盾を回避）
+            var tooClose = false;
+            for (var s = 0; s < starPairs.length; s++) {
+               var dx = px - starPairs[s].px;
+               var dy = py - starPairs[s].py;
+               if (dx * dx + dy * dy < STAR_EXCLUSION_RADIUS * STAR_EXCLUSION_RADIUS) {
+                  tooClose = true;
+                  break;
+               }
+            }
+            if (tooClose) continue;
+         }
+         if (gridMode === "smooth" && starResiduals) {
+            var g = smoothGnomonic(u, v);
+            gridPoints.push({ px: px, py: py, xi: g.xi, eta: g.eta });
+         } else {
+            var xi = cd[0][0] * u + cd[0][1] * v;
+            var eta = cd[1][0] * u + cd[1][1] * v;
+            gridPoints.push({ px: px, py: py, xi: xi, eta: eta });
+         }
       }
    }
 
-   // 2. 星制御点: 正確な RA/Dec → TAN投影
+   // 2. 星制御点
    var starPoints = [];
    for (var i = 0; i < starPairs.length; i++) {
-      var proj = tanProject(crval, [starPairs[i].ra, starPairs[i].dec]);
-      if (proj) {
-         starPoints.push({
-            px: starPairs[i].px, py: starPairs[i].py,
-            xi: proj[0], eta: proj[1]
-         });
+      var u = (starPairs[i].px + 1) - crpix1;
+      var v = (imageHeight - starPairs[i].py) - crpix2;
+      if (gridMode === "smooth" && starResiduals) {
+         // Smooth: IDW correction (at star's own position, correction ≈ exact)
+         var g = smoothGnomonic(u, v);
+         starPoints.push({ px: starPairs[i].px, py: starPairs[i].py, xi: g.xi, eta: g.eta });
+      } else if (gridMode === "linear") {
+         var xi = cd[0][0] * u + cd[0][1] * v;
+         var eta = cd[1][0] * u + cd[1][1] * v;
+         starPoints.push({ px: starPairs[i].px, py: starPairs[i].py, xi: xi, eta: eta });
+      } else {
+         // Off: exact RA/Dec → TAN projection
+         var proj = tanProject(crval, [starPairs[i].ra, starPairs[i].dec]);
+         if (proj) {
+            starPoints.push({
+               px: starPairs[i].px, py: starPairs[i].py,
+               xi: proj[0], eta: proj[1]
+            });
+         }
       }
    }
 
@@ -344,7 +452,8 @@ function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageH
    view.setPropertyValue(prefix + "ControlPoints:Image", cI, PropertyType_F64Vector, attrs);
    view.setPropertyValue(prefix + "ControlPoints:World", cW, PropertyType_F64Vector, attrs);
 
-   console.writeln("  Control points overwritten: grid " + gridPoints.length + " + stars " + starPoints.length + " = " + nTotal + " points");
+   var modeLabel = gridMode === "smooth" ? " (smooth)" : gridMode === "linear" ? " (linear)" : "";
+   console.writeln("  Control points overwritten: grid " + gridPoints.length + " + stars " + starPoints.length + " = " + nTotal + " points" + modeLabel);
 }
 
 //============================================================================
@@ -1396,7 +1505,24 @@ function ManualSolverDialog(targetWindow) {
       self.cancel();
    };
 
+   var gridModeLabel = new Label(this);
+   gridModeLabel.text = "Grid mode:";
+
+   this.gridModeComboBox = new ComboBox(this);
+   this.gridModeComboBox.addItem("Off — exact star positions");
+   this.gridModeComboBox.addItem("Smooth — balanced (IDW)");
+   this.gridModeComboBox.addItem("Linear — perfect grid lines");
+   this.gridModeComboBox.currentItem = 1; // default: Smooth
+   this.gridModeComboBox.toolTip = "Control point generation mode for AnnotateImage grid lines.\n"
+      + "Only affects interp (interpolation) SIP mode.\n\n"
+      + "Off: Exact star positions via TAN projection. Grid may have bumps near stars.\n"
+      + "Smooth: IDW interpolation — accurate near stars, smooth CD-linear far from stars.\n"
+      + "Linear: All CD-linear — perfect grid geometry, star positions shift by lens distortion.";
+
    var mainButtonSizer = new HorizontalSizer;
+   mainButtonSizer.add(gridModeLabel);
+   mainButtonSizer.addSpacing(4);
+   mainButtonSizer.add(this.gridModeComboBox);
    mainButtonSizer.addStretch();
    mainButtonSizer.spacing = 8;
    mainButtonSizer.add(this.solveButton);
@@ -1594,8 +1720,11 @@ ManualSolverDialog.prototype.doApply = function () {
    applyWCSToImage(this.targetWindow, this.wcsResult, this.image.width, this.image.height);
 
    // interp モード時に制御点を上書き（AnnotateImage の注釈位置ズレ修正）
+   var gridModes = ["off", "smooth", "linear"];
+   var gridMode = gridModes[this.gridModeComboBox.currentItem] || "off";
    setCustomControlPoints(this.targetWindow, this.wcsResult,
-      this.starPairs, this.image.width, this.image.height);
+      this.starPairs, this.image.width, this.image.height,
+      gridMode);
 
    // Console output
    var wcsObj = {
@@ -1643,13 +1772,14 @@ ManualSolverDialog.prototype.doApply = function () {
 #define SETTINGS_KEY "ManualImageSolver/sessionData"
 
 // Save session data to Settings
-function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, rotationAngle) {
+function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, rotationAngle, gridMode) {
    var data = {
       imageId: imageId,
       imageWidth: imageWidth,
       imageHeight: imageHeight,
       stretchMode: stretchMode,
       rotationAngle: rotationAngle || 0,
+      gridMode: gridMode || "smooth",
       starPairs: []
    };
    for (var i = 0; i < starPairs.length; i++) {
@@ -1683,13 +1813,15 @@ function loadSession() {
 
 ManualSolverDialog.prototype.saveSessionData = function () {
    if (this.starPairs.length > 0) {
+      var gridModes = ["off", "smooth", "linear"];
       saveSession(
          this.targetWindow.mainView.id,
          this.image.width,
          this.image.height,
          this.stretchMode,
          this.starPairs,
-         this.preview.rotationAngle
+         this.preview.rotationAngle,
+         gridModes[this.gridModeComboBox.currentItem] || "smooth"
       );
       console.writeln("Session data saved (" + this.starPairs.length + " stars).");
    }
@@ -1857,6 +1989,7 @@ function main() {
    var restoredStarPairs = null;
    var restoredStretchMode = null;
    var restoredRotationAngle = 0;
+   var restoredGridMode = "smooth";
    var sessionData = loadSession();
    if (sessionData
        && sessionData.imageWidth === image.width
@@ -1870,6 +2003,7 @@ function main() {
          restoredStarPairs = sessionData.starPairs;
          restoredStretchMode = sessionData.stretchMode || "linked";
          restoredRotationAngle = sessionData.rotationAngle || 0;
+         restoredGridMode = sessionData.gridMode || (sessionData.smoothGrid === false ? "off" : "smooth");
          console.writeln("Restoring session (" + restoredStarPairs.length + " stars).");
       }
    }
@@ -1879,6 +2013,8 @@ function main() {
    // Session restore: apply star pairs, stretch mode, and rotation
    if (restoredStarPairs) {
       dlg.starPairs = restoredStarPairs;
+      var gridModeIndex = { "off": 0, "smooth": 1, "linear": 2 };
+      dlg.gridModeComboBox.currentItem = gridModeIndex[restoredGridMode] !== undefined ? gridModeIndex[restoredGridMode] : 1;
       if (restoredStretchMode && restoredStretchMode !== dlg.stretchMode) {
          dlg.stretchMode = restoredStretchMode;
          dlg.updateStretchButtons();
