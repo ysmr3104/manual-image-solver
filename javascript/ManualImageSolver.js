@@ -207,7 +207,6 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
    cleanedKw.push(makeFITSKeyword("EQUINOX", 2000.0));
    cleanedKw.push(makeFITSKeyword("PLTSOLVD", "T"));
 
-   // SIP distortion keywords
    if (hasSip) {
       var sip = wcsResult.sip;
       cleanedKw.push(makeFITSKeyword("A_ORDER", sip.order));
@@ -248,20 +247,19 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
 }
 
 //----------------------------------------------------------------------------
-// 制御点直接設定（interp モード時の AnnotateImage 修正用）
+// 制御点直接設定（全モード共通）
 //
-// 広角画像で高次 SIP（補間モード）を使用すると、forward SIP 多項式が星間で
-// 暴走し、regenerateAstrometricSolution() が生成する制御点が汚染される。
-// AnnotateImage は AP/BP（逆SIP）を使わず制御点ベースの RBF スプラインで
-// sky→pixel 変換するため、汚染された制御点 → 注釈位置のズレが発生する。
+// WCSFitter は FITS 座標系 (y-up) で CD 行列を計算するが、PixInsight の
+// regenerateAstrometricSolution() は CD 行列を PixInsight 座標系 (y-down) で
+// そのまま適用するため、画像が上下反転する場合がある。
+// 制御点を直接書き込むことで、PixInsight ピクセル座標 → gnomonic 座標の
+// 正しいマッピングを保証し、regenerateAstrometricSolution() の Y 軸解釈に
+// 依存しない。
 //
-// 解決策: CD 行列の線形マッピングからグリッド制御点を生成し、既知の星位置に
-// 高重みの制御点を追加して、RBF スプラインが星位置では正確に、間は滑らかに
-// 補間するようにする。
+// interp モードでは追加で、高次 SIP の暴走による制御点汚染を防ぐ。
+// gridMode ("off"/"smooth"/"linear") は interp モード時のみ有効。
 //----------------------------------------------------------------------------
 function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageHeight, gridMode) {
-   // interp モード以外では不要（approx モードの forward SIP は滑らか）
-   if (!wcsResult.sipMode || wcsResult.sipMode !== "interp") return;
    if (!gridMode) gridMode = "off";
 
    var view = window.mainView;
@@ -271,10 +269,14 @@ function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageH
    var crpix2 = wcsResult.crpix2;
    var DEG2RAD = Math.PI / 180.0;
 
-   // Grid mode:
+   var isInterp = wcsResult.sipMode === "interp";
+   var hasSipCoeffs = wcsResult.sip && wcsResult.sip.a && wcsResult.sip.b;
+
+   // Grid mode (interp のみ有効):
    //   "off"    - grid=CD-linear (star exclusion), stars=exact tanProject
    //   "smooth" - grid/stars=CD-linear + IDW correction (exact near stars, CD-linear far)
    //   "linear" - grid/stars=all CD-linear (perfect grid geometry, shifted stars)
+   // Non-interp: always CD+SIP grid + tanProject stars
 
    // Pre-compute star 3D residuals for "smooth" mode (IDW interpolation)
    var starResiduals = null;
@@ -360,8 +362,22 @@ function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageH
 
    // 1. グリッド制御点
    var STAR_EXCLUSION_RADIUS = 100;
-   var nGridX = (gridMode === "off") ? 20 : (gridMode === "smooth" ? 20 : 4);
-   var nGridY = (gridMode === "off") ? 30 : (gridMode === "smooth" ? 30 : 4);
+   // Compute gnomonic coords from CD matrix (+ SIP for approx mode)
+   function cdToGnomonic(u, v) {
+      var uCorr = u, vCorr = v;
+      if (!isInterp && hasSipCoeffs) {
+         uCorr = u + evalSipPolynomial(wcsResult.sip.a, u, v);
+         vCorr = v + evalSipPolynomial(wcsResult.sip.b, u, v);
+      }
+      return {
+         xi: cd[0][0] * uCorr + cd[0][1] * vCorr,
+         eta: cd[1][0] * uCorr + cd[1][1] * vCorr
+      };
+   }
+
+   var effectiveMode = isInterp ? gridMode : "off";
+   var nGridX = (effectiveMode === "linear") ? 4 : 20;
+   var nGridY = (effectiveMode === "linear") ? 4 : 30;
    var gridPoints = [];
    for (var gy = 0; gy <= nGridY; gy++) {
       for (var gx = 0; gx <= nGridX; gx++) {
@@ -369,8 +385,8 @@ function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageH
          var py = gy * (imageHeight - 1) / nGridY;
          var u = (px + 1) - crpix1;
          var v = (imageHeight - py) - crpix2;
-         if (gridMode === "off") {
-            // 星に近すぎるグリッド点を除外（CD線形値と星の正確な値の矛盾を回避）
+         if (effectiveMode === "off") {
+            // 星に近すぎるグリッド点を除外（CD値と星の正確な値の矛盾を回避）
             var tooClose = false;
             for (var s = 0; s < starPairs.length; s++) {
                var dx = px - starPairs[s].px;
@@ -382,13 +398,12 @@ function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageH
             }
             if (tooClose) continue;
          }
-         if (gridMode === "smooth" && starResiduals) {
+         if (effectiveMode === "smooth" && starResiduals) {
             var g = smoothGnomonic(u, v);
             gridPoints.push({ px: px, py: py, xi: g.xi, eta: g.eta });
          } else {
-            var xi = cd[0][0] * u + cd[0][1] * v;
-            var eta = cd[1][0] * u + cd[1][1] * v;
-            gridPoints.push({ px: px, py: py, xi: xi, eta: eta });
+            var g = cdToGnomonic(u, v);
+            gridPoints.push({ px: px, py: py, xi: g.xi, eta: g.eta });
          }
       }
    }
@@ -398,14 +413,12 @@ function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageH
    for (var i = 0; i < starPairs.length; i++) {
       var u = (starPairs[i].px + 1) - crpix1;
       var v = (imageHeight - starPairs[i].py) - crpix2;
-      if (gridMode === "smooth" && starResiduals) {
-         // Smooth: IDW correction (at star's own position, correction ≈ exact)
+      if (effectiveMode === "smooth" && starResiduals) {
          var g = smoothGnomonic(u, v);
          starPoints.push({ px: starPairs[i].px, py: starPairs[i].py, xi: g.xi, eta: g.eta });
-      } else if (gridMode === "linear") {
-         var xi = cd[0][0] * u + cd[0][1] * v;
-         var eta = cd[1][0] * u + cd[1][1] * v;
-         starPoints.push({ px: starPairs[i].px, py: starPairs[i].py, xi: xi, eta: eta });
+      } else if (effectiveMode === "linear") {
+         var g = cdToGnomonic(u, v);
+         starPoints.push({ px: starPairs[i].px, py: starPairs[i].py, xi: g.xi, eta: g.eta });
       } else {
          // Off: exact RA/Dec → TAN projection
          var proj = tanProject(crval, [starPairs[i].ra, starPairs[i].dec]);
@@ -1719,7 +1732,7 @@ ManualSolverDialog.prototype.doApply = function () {
 
    applyWCSToImage(this.targetWindow, this.wcsResult, this.image.width, this.image.height);
 
-   // interp モード時に制御点を上書き（AnnotateImage の注釈位置ズレ修正）
+   // 制御点を直接書き込み（regenerateAstrometricSolution の Y 軸解釈に依存しない）
    var gridModes = ["off", "smooth", "linear"];
    var gridMode = gridModes[this.gridModeComboBox.currentItem] || "off";
    setCustomControlPoints(this.targetWindow, this.wcsResult,
