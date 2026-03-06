@@ -12,7 +12,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VERSION="1.2.1"
+VERSION="1.2.2"
 PACKAGE_NAME="ManualImageSolver"
 ZIP_NAME="${PACKAGE_NAME}-${VERSION}.zip"
 REPO_DIR="${SCRIPT_DIR}/repository"
@@ -36,9 +36,9 @@ cp "${SCRIPT_DIR}/javascript/wcs_keywords.js"        "${TMPDIR_BASE}/src/scripts
 echo "ファイルをコピーしました:"
 ls -la "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"
 
-# 4. zip 作成
+# 4. 古い zip を削除して新規作成
+rm -f "${REPO_DIR}/${PACKAGE_NAME}"-*.zip
 cd "${TMPDIR_BASE}"
-rm -f "${REPO_DIR}/${ZIP_NAME}"
 zip -r "${REPO_DIR}/${ZIP_NAME}" src/
 cd "${SCRIPT_DIR}"
 
