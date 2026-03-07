@@ -768,6 +768,26 @@ function ImagePreviewControl(parent) {
                      dispW - self.scrollX, dispH - self.scrollY),
             dbmp);
 
+         // Draw candidate star markers (orange crosses, drawn before registered markers)
+         if (self.candidateMarkers) {
+            var viewW = this.width;
+            var viewH = this.height;
+            for (var ci = 0; ci < self.candidateMarkers.length; ci++) {
+               var cm = self.candidateMarkers[ci];
+               var dp = self.imageToDisplay(cm.px, cm.py);
+               var cvx = dp.x * self.zoomLevel - self.scrollX;
+               var cvy = dp.y * self.zoomLevel - self.scrollY;
+               if (cvx < -20 || cvy < -20 || cvx > viewW + 20 || cvy > viewH + 20) continue;
+               g.pen = new Pen(0xCCFF8C00, 1.0);
+               var cr = 6;
+               g.drawLine(cvx - cr, cvy, cvx + cr, cvy);
+               g.drawLine(cvx, cvy - cr, cvx, cvy + cr);
+               g.pen = new Pen(0xAAFF8C00);
+               g.font = new Font("Helvetica", 8);
+               g.drawText(cvx + 8, cvy - 2, cm.label);
+            }
+         }
+
          // Draw markers
          for (var i = 0; i < self.starMarkers.length; i++) {
             var mk = self.starMarkers[i];
@@ -1480,11 +1500,42 @@ function ManualSolverDialog(targetWindow) {
    catButtonSizer.addStretch();
    catButtonSizer.add(this.manualEntryButton);
 
+   // --- Candidate suggestion controls ---
+   this.suggestCheckBox = new CheckBox(this.catalogPanel);
+   this.suggestCheckBox.text = "Suggest";
+   this.suggestCheckBox.checked = true;
+   this.suggestCheckBox.toolTip = "Show candidate star markers on the image after solving";
+   this.suggestCheckBox.onCheck = function () {
+      self.updateCandidateStars();
+   };
+
+   var magLimitLabel = new Label(this.catalogPanel);
+   magLimitLabel.text = "Mag \u2264";
+   magLimitLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+
+   this.magLimitSpinBox = new SpinBox(this.catalogPanel);
+   this.magLimitSpinBox.minValue = 0;
+   this.magLimitSpinBox.maxValue = 80;
+   this.magLimitSpinBox.value = 30;
+   this.magLimitSpinBox.toolTip = "Magnitude limit for candidate stars (x10, e.g. 30 = mag 3.0)";
+   this.magLimitSpinBox.onValueUpdated = function () {
+      self.updateCandidateStars();
+   };
+
+   var candidateSizer = new HorizontalSizer;
+   candidateSizer.spacing = 4;
+   candidateSizer.add(this.suggestCheckBox);
+   candidateSizer.addSpacing(8);
+   candidateSizer.add(magLimitLabel);
+   candidateSizer.add(this.magLimitSpinBox);
+   candidateSizer.addStretch();
+
    var catSizer = new VerticalSizer;
    catSizer.margin = 4;
    catSizer.spacing = 4;
    catSizer.add(catCategorySizer);
    catSizer.add(catSearchSizer);
+   catSizer.add(candidateSizer);
    catSizer.add(this.catalogTreeBox, 100);
    catSizer.add(catButtonSizer);
    this.catalogPanel.sizer = catSizer;
@@ -1711,6 +1762,9 @@ ManualSolverDialog.prototype.onImageClicked = function (imgX, imgY) {
    this.preview.viewport.update();
    this.statusLabel.text = "Star clicked (" + cx.toFixed(1) + ", " + cy.toFixed(1)
       + "). Select from catalog or click [Manual] for manual entry.";
+
+   // Highlight nearest candidates in catalog
+   this.highlightNearestCandidates(cx, cy);
 };
 
 //----------------------------------------------------------------------------
@@ -1794,7 +1848,9 @@ ManualSolverDialog.prototype.pairWithCatalogEntry = function (node) {
       name: name
    });
    this.wcsResult = null;
+   this.candidateRanking = null;
    this.clearPendingClick();
+   this.updateCandidateStars();
    this.refreshAll();
 };
 
@@ -1874,6 +1930,12 @@ ManualSolverDialog.prototype.refreshAll = function () {
 
    // Button state
    this.applyButton.enabled = (this.wcsResult !== null && this.wcsResult.success);
+
+   // Clear candidate markers if WCS is invalidated
+   if (!this.wcsResult || !this.wcsResult.success) {
+      this.candidateStars = [];
+      this.preview.candidateMarkers = null;
+   }
 
    // Update catalog panel paired status
    this.updateCatalogPairedStatus();
@@ -2008,6 +2070,51 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
    }
 
    this.updateCatalogPairedStatus();
+   this.updateCatalogCandidateHighlight();
+};
+
+//----------------------------------------------------------------------------
+// Catalog panel: highlight candidate stars (nearest to clicked position)
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.updateCatalogCandidateHighlight = function () {
+   if (!this.candidateRanking || this.candidateRanking.length === 0) return;
+
+   // Build lookup: label -> rank (0=nearest)
+   var rankMap = {};
+   for (var i = 0; i < this.candidateRanking.length; i++) {
+      rankMap[this.candidateRanking[i].label.toLowerCase()] = i;
+   }
+
+   for (var i = 0; i < this.catalogTreeBox.numberOfChildren; i++) {
+      var node = this.catalogTreeBox.child(i);
+      var nodeLabel = node.text(1).toLowerCase();
+      var rank = -1;
+
+      // Check direct match or prefix match
+      if (rankMap.hasOwnProperty(nodeLabel)) {
+         rank = rankMap[nodeLabel];
+      } else {
+         for (var rl in rankMap) {
+            if (rankMap.hasOwnProperty(rl)) {
+               if (nodeLabel.indexOf(rl + " ") === 0 || rl.indexOf(nodeLabel) === 0) {
+                  rank = rankMap[rl];
+                  break;
+               }
+            }
+         }
+      }
+
+      if (rank === 0) {
+         for (var c = 0; c < 5; c++) {
+            node.setBackgroundColor(c, 0x40FF8C00);
+         }
+      } else if (rank > 0 && rank < 5) {
+         for (var c = 0; c < 5; c++) {
+            node.setBackgroundColor(c, 0x20FF8C00);
+         }
+      }
+   }
 };
 
 //----------------------------------------------------------------------------
@@ -2041,6 +2148,104 @@ ManualSolverDialog.prototype.updateCatalogPairedStatus = function () {
       if (isPaired) {
          for (var c = 0; c < 5; c++) {
             node.setTextColor(c, 0xff888888);
+         }
+      }
+   }
+};
+
+//----------------------------------------------------------------------------
+// Candidate star suggestion: compute and display candidate markers
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.updateCandidateStars = function () {
+   this.candidateStars = [];
+   this.preview.candidateMarkers = null;
+
+   if (!this.suggestCheckBox.checked || !this.wcsResult || !this.wcsResult.success) {
+      this.preview.viewport.update();
+      return;
+   }
+
+   var magLimit = this.magLimitSpinBox.value / 10.0;
+   var imageWidth = this.image.width;
+   var imageHeight = this.image.height;
+
+   // Build set of paired object names (lowercase) to exclude
+   var pairedNames = {};
+   for (var i = 0; i < this.starPairs.length; i++) {
+      if (this.starPairs[i].name) {
+         pairedNames[this.starPairs[i].name.toLowerCase()] = true;
+      }
+   }
+
+   var candidates = [];
+
+   // Scan CATALOG_STARS
+   for (var i = 0; i < CATALOG_STARS.length; i++) {
+      var s = CATALOG_STARS[i];
+      if (s.mag > magLimit) continue;
+      var label = s.name || s.bayer || ("HIP " + s.hip);
+      if (pairedNames[label.toLowerCase()]) continue;
+      var pix = skyToPixel(s.ra, s.dec, this.wcsResult, imageHeight);
+      if (!pix) continue;
+      if (pix.px < 0 || pix.px >= imageWidth || pix.py < 0 || pix.py >= imageHeight) continue;
+      candidates.push({ px: pix.px, py: pix.py, ra: s.ra, dec: s.dec, name: label, label: label, mag: s.mag });
+   }
+
+   // Scan MESSIER_OBJECTS
+   for (var i = 0; i < MESSIER_OBJECTS.length; i++) {
+      var m = MESSIER_OBJECTS[i];
+      if (m.mag > magLimit) continue;
+      var label = m.id;
+      if (m.name) label += " " + m.name;
+      if (pairedNames[m.id.toLowerCase()] || pairedNames[label.toLowerCase()]) continue;
+      var pix = skyToPixel(m.ra, m.dec, this.wcsResult, imageHeight);
+      if (!pix) continue;
+      if (pix.px < 0 || pix.px >= imageWidth || pix.py < 0 || pix.py >= imageHeight) continue;
+      candidates.push({ px: pix.px, py: pix.py, ra: m.ra, dec: m.dec, name: m.id, label: m.id, mag: m.mag });
+   }
+
+   // Sort by magnitude (brightest first)
+   candidates.sort(function (a, b) { return a.mag - b.mag; });
+
+   this.candidateStars = candidates;
+   this.preview.candidateMarkers = candidates;
+   this.preview.viewport.update();
+};
+
+//----------------------------------------------------------------------------
+// Highlight nearest candidates in catalog list when image is clicked
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.highlightNearestCandidates = function (px, py) {
+   if (!this.candidateStars || this.candidateStars.length === 0) return;
+
+   // Compute distance to each candidate
+   var ranked = [];
+   for (var i = 0; i < this.candidateStars.length; i++) {
+      var c = this.candidateStars[i];
+      var dx = c.px - px;
+      var dy = c.py - py;
+      ranked.push({ dist: Math.sqrt(dx * dx + dy * dy), name: c.name, label: c.label });
+   }
+   ranked.sort(function (a, b) { return a.dist - b.dist; });
+
+   // Keep top 5
+   this.candidateRanking = ranked.slice(0, 5);
+
+   // Rebuild catalog list to apply highlight colors
+   this.buildCatalogList();
+
+   // Auto-scroll to the nearest candidate in catalog TreeBox
+   if (this.candidateRanking.length > 0) {
+      var topLabel = this.candidateRanking[0].label.toLowerCase();
+      for (var i = 0; i < this.catalogTreeBox.numberOfChildren; i++) {
+         var node = this.catalogTreeBox.child(i);
+         if (node.text(1).toLowerCase() === topLabel
+             || node.text(1).toLowerCase().indexOf(topLabel + " ") === 0
+             || topLabel.indexOf(node.text(1).toLowerCase()) === 0) {
+            this.catalogTreeBox.currentNode = node;
+            break;
          }
       }
    }
@@ -2104,6 +2309,7 @@ ManualSolverDialog.prototype.doSolve = function () {
    console.writeln("  Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px");
    console.writeln("  Stars: " + this.starPairs.length);
 
+   this.updateCandidateStars();
    this.refreshAll();
 };
 
@@ -2172,7 +2378,7 @@ ManualSolverDialog.prototype.doApply = function () {
 #define SETTINGS_KEY "ManualImageSolver/sessionData"
 
 // Save session data to Settings
-function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, rotationAngle, gridMode) {
+function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, rotationAngle, gridMode, suggestEnabled, magLimit) {
    var data = {
       imageId: imageId,
       imageWidth: imageWidth,
@@ -2180,6 +2386,8 @@ function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, r
       stretchMode: stretchMode,
       rotationAngle: rotationAngle || 0,
       gridMode: gridMode || "smooth",
+      suggestEnabled: suggestEnabled !== false,
+      magLimit: typeof magLimit === "number" ? magLimit : 30,
       starPairs: []
    };
    for (var i = 0; i < starPairs.length; i++) {
@@ -2225,7 +2433,9 @@ ManualSolverDialog.prototype.saveSessionData = function () {
          this.stretchMode,
          this.starPairs,
          this.preview.rotationAngle,
-         gridModes[this.gridModeComboBox.currentItem] || "smooth"
+         gridModes[this.gridModeComboBox.currentItem] || "smooth",
+         this.suggestCheckBox.checked,
+         this.magLimitSpinBox.value
       );
       console.writeln("Session data saved (" + this.starPairs.length + " stars).");
    }
@@ -2394,6 +2604,8 @@ function main() {
    var restoredStretchMode = null;
    var restoredRotationAngle = 0;
    var restoredGridMode = "smooth";
+   var restoredSuggestEnabled = true;
+   var restoredMagLimit = 30;
    var sessionData = loadSession();
    if (sessionData
        && sessionData.imageWidth === image.width
@@ -2408,6 +2620,8 @@ function main() {
          restoredStretchMode = sessionData.stretchMode || "linked";
          restoredRotationAngle = sessionData.rotationAngle || 0;
          restoredGridMode = sessionData.gridMode || (sessionData.smoothGrid === false ? "off" : "smooth");
+         restoredSuggestEnabled = sessionData.suggestEnabled !== false;
+         restoredMagLimit = typeof sessionData.magLimit === "number" ? sessionData.magLimit : 30;
          console.writeln("Restoring session (" + restoredStarPairs.length + " stars).");
       }
    }
@@ -2427,6 +2641,8 @@ function main() {
       if (restoredRotationAngle && restoredRotationAngle !== 0) {
          dlg.preview.setRotation(restoredRotationAngle);
       }
+      dlg.suggestCheckBox.checked = restoredSuggestEnabled;
+      dlg.magLimitSpinBox.value = restoredMagLimit;
       dlg.refreshAll();
    }
 

@@ -15,6 +15,7 @@ var evalSipPolynomial = wcs.evalSipPolynomial;
 var determineSipOrder = wcs.determineSipOrder;
 var fitPolynomial2D = wcs.fitPolynomial2D;
 var WCSFitter = wcs.WCSFitter;
+var skyToPixel = wcs.skyToPixel;
 
 var passed = 0;
 var failed = 0;
@@ -1349,6 +1350,121 @@ test("WCSFitter: 広角90° FOV 実データで逆SIP(sky→pixel)が正確", fu
    var result = fitPolynomial2D([0.1, 0.2], [0.3, 0.4], [0.01, 0.02], 2);
    assertTrue(result === null, "should return null when nData < nTerms");
 })();
+
+//============================================================================
+// skyToPixel テスト
+//============================================================================
+
+test("skyToPixel: ラウンドトリップ（ピクセル→天球→ピクセル）", function () {
+   // 合成WCS: 画像中心がRA=180, DEC=45, ピクセルスケール≈1"/px
+   var wcsResult = {
+      crval1: 180.0,
+      crval2: 45.0,
+      crpix1: 500.5,
+      crpix2: 400.5,
+      cd: [
+         [2.778e-4, 0],
+         [0, 2.778e-4]
+      ]
+   };
+   var imageHeight = 800;
+
+   // テストピクセル座標（0-based PixInsight）
+   var testPixels = [
+      { px: 100, py: 200 },
+      { px: 499.5, py: 399.5 },  // 画像中心付近
+      { px: 0, py: 0 },          // 左上
+      { px: 799, py: 599 }       // 右下付近
+   ];
+
+   for (var i = 0; i < testPixels.length; i++) {
+      var tp = testPixels[i];
+      // ピクセル→天球座標（pixelToRaDec相当）
+      var u = (tp.px + 1.0) - wcsResult.crpix1;
+      var v = (imageHeight - tp.py) - wcsResult.crpix2;
+      var xi  = wcsResult.cd[0][0] * u + wcsResult.cd[0][1] * v;
+      var eta = wcsResult.cd[1][0] * u + wcsResult.cd[1][1] * v;
+      var skyCoord = tanDeproject([wcsResult.crval1, wcsResult.crval2], [xi, eta]);
+
+      // 天球→ピクセル座標（skyToPixel）
+      var result = skyToPixel(skyCoord[0], skyCoord[1], wcsResult, imageHeight);
+      assertTrue(result !== null, "skyToPixel should not return null for pixel (" + tp.px + ", " + tp.py + ")");
+      assertEqual(result.px, tp.px, "px round-trip for (" + tp.px + ", " + tp.py + ")", 1e-6);
+      assertEqual(result.py, tp.py, "py round-trip for (" + tp.px + ", " + tp.py + ")", 1e-6);
+   }
+});
+
+test("skyToPixel: 反対半球で null を返す", function () {
+   var wcsResult = {
+      crval1: 0.0,
+      crval2: 45.0,
+      crpix1: 500.5,
+      crpix2: 400.5,
+      cd: [
+         [2.778e-4, 0],
+         [0, 2.778e-4]
+      ]
+   };
+   // RA=180, DEC=-45 は反対半球
+   var result = skyToPixel(180.0, -45.0, wcsResult, 800);
+   assertTrue(result === null, "skyToPixel should return null for opposite hemisphere");
+});
+
+test("skyToPixel: 回転したCD行列でのラウンドトリップ", function () {
+   // 45度回転したCD行列
+   var scale = 2.778e-4;
+   var cos45 = Math.cos(Math.PI / 4);
+   var sin45 = Math.sin(Math.PI / 4);
+   var wcsResult = {
+      crval1: 90.0,
+      crval2: 30.0,
+      crpix1: 300.5,
+      crpix2: 300.5,
+      cd: [
+         [scale * cos45, -scale * sin45],
+         [scale * sin45, scale * cos45]
+      ]
+   };
+   var imageHeight = 600;
+
+   var px = 150, py = 250;
+   var u = (px + 1.0) - wcsResult.crpix1;
+   var v = (imageHeight - py) - wcsResult.crpix2;
+   var xi  = wcsResult.cd[0][0] * u + wcsResult.cd[0][1] * v;
+   var eta = wcsResult.cd[1][0] * u + wcsResult.cd[1][1] * v;
+   var skyCoord = tanDeproject([wcsResult.crval1, wcsResult.crval2], [xi, eta]);
+
+   var result = skyToPixel(skyCoord[0], skyCoord[1], wcsResult, imageHeight);
+   assertTrue(result !== null, "skyToPixel should not return null");
+   assertEqual(result.px, px, "px round-trip with rotated CD", 1e-6);
+   assertEqual(result.py, py, "py round-trip with rotated CD", 1e-6);
+});
+
+test("skyToPixel: WCSFitterの結果でラウンドトリップ", function () {
+   // WCSFitterで合成データからsolve→skyToPixelで検証
+   var imageWidth = 1000;
+   var imageHeight = 800;
+   var stars = [
+      { px: 100, py: 100, ra: 180.1, dec: 45.1, name: "S1" },
+      { px: 900, py: 100, ra: 179.9, dec: 45.1, name: "S2" },
+      { px: 100, py: 700, ra: 180.1, dec: 44.9, name: "S3" },
+      { px: 900, py: 700, ra: 179.9, dec: 44.9, name: "S4" },
+      { px: 500, py: 400, ra: 180.0, dec: 45.0, name: "S5" }
+   ];
+
+   var fitter = new WCSFitter(stars, imageWidth, imageHeight);
+   var wcsResult = fitter.solve();
+   assertTrue(wcsResult.success, "WCSFitter should succeed");
+
+   for (var i = 0; i < stars.length; i++) {
+      var s = stars[i];
+      var result = skyToPixel(s.ra, s.dec, wcsResult, imageHeight);
+      assertTrue(result !== null, "skyToPixel should not return null for star " + s.name);
+      // WCSフィッティングの精度内で一致（1px以内）
+      assertEqual(result.px, s.px, "px for " + s.name, 1.0);
+      assertEqual(result.py, s.py, "py for " + s.name, 1.0);
+   }
+});
 
 //============================================================================
 // 結果サマリー

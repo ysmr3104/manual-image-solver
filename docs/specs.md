@@ -12,6 +12,7 @@
 8. [天体名検索（CDS Sesame）](#8-天体名検索cds-sesame)
 9. [UI 設計](#9-ui-設計)
 10. [組み込みカタログデータ](#10-組み込みカタログデータ)
+11. [候補星サジェスト](#11-候補星サジェスト)
 
 ---
 
@@ -621,3 +622,64 @@ lines: [[26727,26311,25930], [29426,28614,27989,...], ...]
 - 恒星座標: [HYG Database](https://github.com/astronexus/HYG-Database)（Hipparcos カタログ由来）
 - 星座線: [Stellarium skycultures](https://github.com/Stellarium/stellarium-skycultures)（western skyculture）
 - メシエ天体: SEDS Messier Catalog
+
+---
+
+## 11. 候補星サジェスト
+
+### 11.1 概要
+
+3星以上で Solve 実行後、暫定 WCS 結果を使ってカタログ星の画像上の位置を予測し、候補マーカーとして表示する機能。次の星のペアリングを高速化する。
+
+### 11.2 ワークフロー
+
+1. ユーザーが 4 星以上を登録して **Solve** を実行
+2. Solve 成功後、`skyToPixel()` で全カタログ星（CATALOG_STARS + MESSIER_OBJECTS）の画像上の位置を計算
+3. 等級制限（Mag limit）以下かつ画像範囲内の未ペアリング星を候補として抽出
+4. 画像上にオレンジ色の十字マーカー + 名前ラベルを描画
+5. ユーザーが画像をクリックすると、最も近い候補 5 件がカタログリストでハイライト表示
+6. ハイライトされた候補をダブルクリックでペアリング
+
+### 11.3 skyToPixel() 関数
+
+`wcs_math.js` に追加。WCS 結果（CRVAL, CRPIX, CD行列）から RA/DEC をピクセル座標に変換する。
+
+```
+skyToPixel(ra, dec, wcsResult, imageHeight)
+  1. tanProject(ra, dec, crval1, crval2) → xi, eta
+  2. CD逆行列: det = CD1_1*CD2_2 - CD1_2*CD2_1
+     u = (CD2_2*xi - CD1_2*eta) / det
+     v = (-CD2_1*xi + CD1_1*eta) / det
+  3. FITS→PixInsight座標変換:
+     px = u + CRPIX1 - 1
+     py = imageHeight - (v + CRPIX2)
+  4. return {px, py} or null (反対半球)
+```
+
+- TAN-only（SIP 補正なし）: 暫定 Solve での候補表示には十分な精度
+- 広角レンズで画像端の候補位置がずれる可能性あり（ガイドとしては許容範囲）
+
+### 11.4 UI 構成
+
+カタログパネルの Search 行の下に候補コントロール行を配置:
+
+- **Suggest チェックボックス**: 候補表示の ON/OFF（デフォルト ON）
+- **Mag limit SpinBox**: 等級制限値（×10、デフォルト 30 = 3.0 等級）
+
+### 11.5 マーカー描画
+
+- 色: `0xCCFF8C00`（ダークオレンジ、半透明）
+- 形状: 十字線（6px）+ 名前ラベル（8pt）
+- 登録済みマーカー（緑円 + 赤十字）の**下**に描画
+
+### 11.6 カタログリストハイライト
+
+画像クリック時に候補との距離を計算し、上位 5 件をカタログリストでハイライト:
+
+- 1 位: 背景色 `0x40FF8C00`（オレンジ濃）
+- 2〜5 位: 背景色 `0x20FF8C00`（オレンジ薄）
+- 1 位のノードに自動スクロール
+
+### 11.7 セッション保存
+
+`suggestEnabled`（bool）と `magLimit`（int, ×10）をセッションデータに含めて保存・復元。

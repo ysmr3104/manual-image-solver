@@ -27,6 +27,7 @@ When automatic plate solving with astrometry.net or PixInsight's ImageSolver fai
 - **Export / Import**: Save and load star pair data as JSON files
 - **Sesame search**: Auto-resolve RA/DEC from object names via the CDS Sesame database
 - **Centroid calculation**: Auto-snap to star centers using intensity-weighted centroid
+- **Candidate star suggestion**: After solving, catalog stars are projected onto the image as orange markers — click near one to auto-highlight it in the catalog list for quick pairing
 
 ## Installation
 
