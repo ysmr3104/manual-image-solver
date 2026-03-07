@@ -1,6 +1,6 @@
 [日本語](README.ja.md)
 
-# Manual Image Solver v1.2.1
+# Manual Image Solver v1.3.0
 
 A manual plate solving tool for PixInsight. Manually identify stars on an image to compute and apply a TAN (gnomonic) projection WCS (World Coordinate System).
 
@@ -10,10 +10,13 @@ When automatic plate solving with astrometry.net or PixInsight's ImageSolver fai
 
 **Runs entirely within PixInsight**: No external dependencies like Python required. All operations — image display, star selection, WCS fitting, and application — are performed within a native PJSR Dialog.
 
-![Main dialog with registered stars](docs/images/03_stars_registered.jpg)
+![Main dialog with registered stars](docs/images/05_stars_registered.jpg)
 
 ## Features
 
+- **Built-in catalog browser**: Navigation Stars (50 brightest stars), Messier Objects (M1–M110), and all 88 constellation star lists — click the image, then select from the catalog to pair
+- **Constellation names in Japanese**: Category dropdown shows Japanese constellation names alongside the official Latin names
+- **Greek letter legend**: Quick reference for Bayer designation Greek letters displayed above the star table
 - **Intuitive controls**: Click to select stars, drag to pan (no mode switching needed)
 - **Stretch modes**: Switch between None / Linked / Unlinked with one click
 - **19-level zoom**: Mouse wheel (centered on cursor), Fit / 1:1 buttons, +/- buttons
@@ -52,21 +55,29 @@ No Python or external packages required.
 
 Open the target image in PixInsight and run **Script > Utilities > ManualImageSolver**.
 
-The dialog opens with a stretched preview of the image.
+The dialog opens with a stretched preview of the image and the catalog browser panel on the right.
 
 ![Main dialog - initial state](docs/images/01_gui_initial.jpg)
 
 If session data from a previous run exists, a dialog will ask whether to restore it.
 
-<img src="docs/images/08_restore_dialog.jpg" alt="Session restore dialog" width="480">
+<img src="docs/images/07_restore_dialog.jpg" alt="Session restore dialog" width="480">
 
 ### 2. Register Stars
 
-**Click** on a star in the image. The centroid algorithm auto-snaps to the star center, and a coordinate input dialog opens.
+**Click** on a star in the image. The centroid algorithm auto-snaps to the star center. The status bar will prompt you to select a star from the catalog panel.
 
-<img src="docs/images/02_star_dialog.jpg" alt="Star coordinate input dialog" width="480">
+**From the catalog**: Select a constellation or category from the **Category** dropdown, then **double-click** a star in the list to pair it.
 
-Enter an **object name** and click **Search** to auto-fill RA/DEC from the CDS Sesame database. You can also enter RA/DEC directly.
+<img src="docs/images/03_catalog_selection.jpg" alt="Catalog selection workflow" width="640">
+
+The Category dropdown includes Japanese constellation names for easy identification.
+
+<img src="docs/images/02_catalog_dropdown.jpg" alt="Category dropdown with Japanese names" width="420">
+
+**Manual entry**: Click **Manual...** to open the coordinate input dialog. Enter an **object name** and click **Search** to auto-fill RA/DEC from the CDS Sesame database, or enter RA/DEC directly.
+
+<img src="docs/images/04_star_dialog.jpg" alt="Star coordinate input dialog" width="640">
 
 #### Coordinate Input Formats
 
@@ -81,6 +92,8 @@ Enter an **object name** and click **Search** to auto-fill RA/DEC from the CDS S
 
 Once 4 or more stars are registered, click the **Solve** button. WCS fitting is performed and residuals for each star are displayed.
 
+![Stars registered](docs/images/05_stars_registered.jpg)
+
 ### 4. Apply WCS
 
 Click **Apply to Image** to write the WCS directly to the active image.
@@ -93,11 +106,11 @@ The Process Console displays fit details including per-star residuals, corner co
 
 After WCS application, use PixInsight's **AnnotateImage** to overlay constellation lines and object annotations for verification.
 
-![Verification with AnnotateImage](docs/images/07_annotated_image.jpg)
-
 ### Tips
 
 - **Star selection**: Click on the image (auto-snaps via centroid)
+- **Catalog pairing**: After clicking a star, double-click a catalog entry to pair
+- **Manual entry**: Click **Manual...** for objects not in the catalog (e.g., NGC objects via Sesame search)
 - **Pan**: Left-button drag or middle-button drag
 - **Zoom**: Mouse wheel (centered on cursor position)
 - **Zoom buttons**: Fit (fit to window), 1:1 (actual size), + (zoom in), - (zoom out)
@@ -106,6 +119,7 @@ After WCS application, use PixInsight's **AnnotateImage** to overlay constellati
 - **Edit stars**: Double-click a table row, or select and click **Edit...**
 - **Remove stars**: Select and click **Remove**
 - **Export / Import**: Save and load star pair data as JSON files
+- **Greek letters**: Reference legend is displayed above the star table (α:Alp β:Bet γ:Gam ...)
 
 ### WCSApplier.js (Manual JSON Application)
 

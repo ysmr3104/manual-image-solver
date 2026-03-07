@@ -11,7 +11,7 @@
 // Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.2.2"
+#define VERSION "1.3.0"
 
 #include <pjsr/DataType.jsh>
 #include <pjsr/StdIcon.jsh>
@@ -1420,7 +1420,9 @@ function ManualSolverDialog(targetWindow) {
    conKeys.sort();
    for (var ci = 0; ci < conKeys.length; ci++) {
       var ck = conKeys[ci];
-      this.catalogCategoryCombo.addItem(ck + " - " + CONSTELLATION_LINES[ck].name);
+      var conLabel = ck + " - " + CONSTELLATION_LINES[ck].name;
+      if (CONSTELLATION_LINES[ck].nameJa) conLabel += " (" + CONSTELLATION_LINES[ck].nameJa + ")";
+      this.catalogCategoryCombo.addItem(conLabel);
    }
    this.catalogCategoryCombo.onItemSelected = function () {
       self.buildCatalogList();
@@ -1498,6 +1500,10 @@ function ManualSolverDialog(targetWindow) {
    // --- Star table (TreeBox) ---
    var starTableLabel = new Label(this);
    starTableLabel.text = "Reference Stars (minimum 4):";
+
+   var greekLegend = new Label(this);
+   greekLegend.text = "\u03b1:Alp  \u03b2:Bet  \u03b3:Gam  \u03b4:Del  \u03b5:Eps  \u03b6:Zet  \u03b7:Eta  \u03b8:The  \u03b9:Iot  \u03ba:Kap  \u03bb:Lam  \u03bc:Mu  \u03bd:Nu  \u03be:Xi  \u03bf:Omi  \u03c0:Pi  \u03c1:Rho  \u03c3:Sig  \u03c4:Tau  \u03c5:Ups  \u03c6:Phi  \u03c7:Chi  \u03c8:Psi  \u03c9:Ome";
+   greekLegend.textAlignment = TextAlign_Left | TextAlign_VertCenter;
 
    this.starTreeBox = new TreeBox(this);
    this.starTreeBox.alternateRowColor = true;
@@ -1667,6 +1673,7 @@ function ManualSolverDialog(targetWindow) {
    this.sizer.add(toolbarSizer);
    this.sizer.add(previewAreaSizer, 100);
    this.sizer.add(starTableLabel);
+   this.sizer.add(greekLegend);
    this.sizer.add(this.starTreeBox, 50);
    this.sizer.add(starButtonSizer);
    this.sizer.add(this.statusLabel);
@@ -2020,7 +2027,17 @@ ManualSolverDialog.prototype.updateCatalogPairedStatus = function () {
    for (var i = 0; i < this.catalogTreeBox.numberOfChildren; i++) {
       var node = this.catalogTreeBox.child(i);
       var label = node.text(1).toLowerCase();
-      var isPaired = pairedNames.hasOwnProperty(label) && pairedNames[label];
+      // Exact match, or catalog label starts with paired name + space
+      // (e.g. paired "m16" matches catalog "m16 eagle nebula")
+      var isPaired = pairedNames.hasOwnProperty(label);
+      if (!isPaired) {
+         for (var pn in pairedNames) {
+            if (pairedNames.hasOwnProperty(pn) && label.indexOf(pn + " ") === 0) {
+               isPaired = true;
+               break;
+            }
+         }
+      }
       if (isPaired) {
          for (var c = 0; c < 5; c++) {
             node.setTextColor(c, 0xff888888);
