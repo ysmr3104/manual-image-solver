@@ -1440,16 +1440,17 @@ function ManualSolverDialog(targetWindow) {
    this.catalogTreeBox.alternateRowColor = true;
    this.catalogTreeBox.headerVisible = true;
    this.catalogTreeBox.headerSorting = true;
-   this.catalogTreeBox.numberOfColumns = 4;
-   this.catalogTreeBox.setHeaderText(0, "Name");
-   this.catalogTreeBox.setHeaderText(1, "RA");
-   this.catalogTreeBox.setHeaderText(2, "DEC");
-   this.catalogTreeBox.setHeaderText(3, "Mag");
-   this.catalogTreeBox.setColumnWidth(0, 115);
-   this.catalogTreeBox.setColumnWidth(1, 55);
-   this.catalogTreeBox.setColumnWidth(2, 55);
-   this.catalogTreeBox.setColumnWidth(3, 40);
-   this.catalogTreeBox.sort(0, true); // Name ascending by default
+   this.catalogTreeBox.numberOfColumns = 5;
+   this.catalogTreeBox.setHeaderText(0, "#");
+   this.catalogTreeBox.setHeaderText(1, "Name");
+   this.catalogTreeBox.setHeaderText(2, "RA");
+   this.catalogTreeBox.setHeaderText(3, "DEC");
+   this.catalogTreeBox.setHeaderText(4, "Mag");
+   this.catalogTreeBox.setColumnWidth(0, 55);
+   this.catalogTreeBox.setColumnWidth(1, 100);
+   this.catalogTreeBox.setColumnWidth(2, 48);
+   this.catalogTreeBox.setColumnWidth(3, 52);
+   this.catalogTreeBox.sort(0, true); // # ascending by default
 
    // Double-click catalog entry -> pair with pending click
    this.catalogTreeBox.onNodeDoubleClicked = function (node) {
@@ -1733,7 +1734,7 @@ ManualSolverDialog.prototype.pairWithCatalogEntry = function (node) {
 
    // Parse RA/DEC from catalog node text (compact format HH:MM / +DD:MM)
    // Re-lookup from catalog data for full precision
-   var label = node.text(0);
+   var label = node.text(1);
    var ra = null, dec = null, name = label;
 
    // Search in catalog stars
@@ -1870,24 +1871,32 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
    var items = [];
 
    if (catIdx === 0) {
-      // Navigation Stars
+      // Navigation Stars — sort by magnitude (brightest first)
+      var navStars = [];
       for (var i = 0; i < CATALOG_STARS.length; i++) {
          var s = CATALOG_STARS[i];
          if (NAVIGATION_STAR_HIPS.indexOf(s.hip) >= 0) {
-            items.push({
-               label: s.name || s.bayer,
-               ra: s.ra, dec: s.dec, mag: s.mag,
-               searchKey: (s.name + " " + s.bayer).toLowerCase()
-            });
+            navStars.push(s);
          }
       }
+      navStars.sort(function (a, b) { return a.mag - b.mag; });
+      for (var i = 0; i < navStars.length; i++) {
+         var s = navStars[i];
+         items.push({
+            seq: i + 1,
+            label: s.name || s.bayer,
+            ra: s.ra, dec: s.dec, mag: s.mag,
+            searchKey: (s.name + " " + s.bayer).toLowerCase()
+         });
+      }
    } else if (catIdx === 1) {
-      // Messier Objects
+      // Messier Objects — seq = Messier number (1-110)
       for (var i = 0; i < MESSIER_OBJECTS.length; i++) {
          var m = MESSIER_OBJECTS[i];
          var label = m.id;
          if (m.name) label += " " + m.name;
          items.push({
+            seq: i + 1,
             label: label,
             ra: m.ra, dec: m.dec, mag: m.mag,
             searchKey: (m.id + " " + m.name).toLowerCase()
@@ -1909,15 +1918,22 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
             conHips[lineData[li][pi]] = true;
          }
       }
+      var conStars = [];
       for (var i = 0; i < CATALOG_STARS.length; i++) {
          var s = CATALOG_STARS[i];
          if (conHips[s.hip]) {
-            items.push({
-               label: s.name || s.bayer || ("HIP " + s.hip),
-               ra: s.ra, dec: s.dec, mag: s.mag,
-               searchKey: (s.name + " " + s.bayer + " HIP " + s.hip).toLowerCase()
-            });
+            conStars.push(s);
          }
+      }
+      conStars.sort(function (a, b) { return a.mag - b.mag; });
+      for (var i = 0; i < conStars.length; i++) {
+         var s = conStars[i];
+         items.push({
+            seq: i + 1,
+            label: s.name || s.bayer || ("HIP " + s.hip),
+            ra: s.ra, dec: s.dec, mag: s.mag,
+            searchKey: (s.name + " " + s.bayer + " HIP " + s.hip).toLowerCase()
+         });
       }
    }
 
@@ -1932,28 +1948,28 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
       items = filtered;
    }
 
-   // Sort by name (default)
-   items.sort(function (a, b) {
-      return a.label.toLowerCase() < b.label.toLowerCase() ? -1
-           : a.label.toLowerCase() > b.label.toLowerCase() ? 1 : 0;
-   });
+   // No pre-sort needed; items already in natural order with seq numbers.
+   // TreeBox headerSorting on column 0 (#) will sort by zero-padded seq.
 
    // Populate TreeBox
    for (var i = 0; i < items.length; i++) {
       var it = items[i];
       var node = new TreeBoxNode(this.catalogTreeBox);
-      node.setText(0, it.label);
+      // Column 0: # (zero-padded for correct string sort)
+      var seqStr = it.seq < 10 ? "00" + it.seq : it.seq < 100 ? "0" + it.seq : "" + it.seq;
+      node.setText(0, seqStr);
+      node.setText(1, it.label);
       // Compact RA/DEC: HH:MM / +DD:MM
       var raH = it.ra / 15.0;
       var raHH = Math.floor(raH);
       var raMM = Math.floor((raH - raHH) * 60);
-      node.setText(1, (raHH < 10 ? "0" : "") + raHH + ":" + (raMM < 10 ? "0" : "") + raMM);
+      node.setText(2, (raHH < 10 ? "0" : "") + raHH + ":" + (raMM < 10 ? "0" : "") + raMM);
       var decSign = it.dec >= 0 ? "+" : "-";
       var decAbs = Math.abs(it.dec);
       var decDD = Math.floor(decAbs);
       var decMM = Math.floor((decAbs - decDD) * 60);
-      node.setText(2, decSign + (decDD < 10 ? "0" : "") + decDD + ":" + (decMM < 10 ? "0" : "") + decMM);
-      node.setText(3, it.mag.toFixed(1));
+      node.setText(3, decSign + (decDD < 10 ? "0" : "") + decDD + ":" + (decMM < 10 ? "0" : "") + decMM);
+      node.setText(4, it.mag.toFixed(1));
    }
 
    this.updateCatalogPairedStatus();
@@ -1975,7 +1991,7 @@ ManualSolverDialog.prototype.updateCatalogPairedStatus = function () {
    // Gray out paired entries in catalog TreeBox
    for (var i = 0; i < this.catalogTreeBox.numberOfChildren; i++) {
       var node = this.catalogTreeBox.child(i);
-      var label = node.text(0).toLowerCase();
+      var label = node.text(1).toLowerCase();
       // Check if any paired name matches the beginning of the label
       var isPaired = false;
       for (var pn in pairedNames) {
@@ -1985,7 +2001,7 @@ ManualSolverDialog.prototype.updateCatalogPairedStatus = function () {
          }
       }
       if (isPaired) {
-         for (var c = 0; c < 4; c++) {
+         for (var c = 0; c < 5; c++) {
             node.setTextColor(c, 0xff888888);
          }
       }
