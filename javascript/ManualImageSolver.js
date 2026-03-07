@@ -712,6 +712,7 @@ function ImagePreviewControl(parent) {
    this.zoomLevel = 1.0;      // Display zoom level
    this.starMarkers = [];     // [{imgX, imgY, index}]
    this.selectedIndex = -1;   // Currently selected marker index
+   this.pendingMarker = null; // {imgX, imgY} for pending catalog selection
    this.onImageClick = null;  // Callback: function(imgX, imgY)
 
    // Manual scroll management
@@ -792,6 +793,25 @@ function ImagePreviewControl(parent) {
             g.pen = new Pen(0xE6FFFF00);
             g.font = new Font("Helvetica", 9);
             g.drawText(vx + circleR + 2, vy - circleR + 2, "" + (i + 1));
+         }
+
+         // Draw pending click marker (cyan dashed circle)
+         if (self.pendingMarker) {
+            var pp = self.imageToDisplay(self.pendingMarker.imgX, self.pendingMarker.imgY);
+            var pvx = pp.x * self.zoomLevel - self.scrollX;
+            var pvy = pp.y * self.zoomLevel - self.scrollY;
+
+            g.pen = new Pen(0xFF00FFFF, 2);  // Cyan
+            g.drawCircle(pvx, pvy, 16);
+
+            // Crosshair
+            g.pen = new Pen(0xCC00FFFF, 1.5);
+            g.drawLine(pvx - 10, pvy, pvx + 10, pvy);
+            g.drawLine(pvx, pvy - 10, pvx, pvy + 10);
+
+            g.pen = new Pen(0xE600FFFF);
+            g.font = new Font("Helvetica", 9);
+            g.drawText(pvx + 18, pvy - 14, "?");
          }
       }
 
@@ -1257,6 +1277,7 @@ function ManualSolverDialog(targetWindow) {
    this.starPairs = [];      // [{px, py, ra, dec, name}]
    this.wcsResult = null;    // Result of WCSFitter.solve()
    this.stretchMode = "linked"; // "none" / "linked" / "unlinked"
+   this.pendingClick = null;  // {px, py} awaiting catalog selection
 
    this.windowTitle = TITLE + " v" + VERSION;
    this.minWidth = 800;
@@ -1438,6 +1459,11 @@ function ManualSolverDialog(targetWindow) {
    this.catalogTreeBox.setColumnWidth(2, 55);
    this.catalogTreeBox.setColumnWidth(3, 35);
 
+   // Double-click catalog entry -> pair with pending click
+   this.catalogTreeBox.onNodeDoubleClicked = function (node) {
+      self.pairWithCatalogEntry(node);
+   };
+
    var catCategorySizer = new HorizontalSizer;
    catCategorySizer.spacing = 4;
    catCategorySizer.add(catCategoryLabel);
@@ -1448,12 +1474,24 @@ function ManualSolverDialog(targetWindow) {
    catSearchSizer.add(catSearchLabel);
    catSearchSizer.add(this.catalogSearchEdit, 100);
 
+   this.manualEntryButton = new PushButton(this.catalogPanel);
+   this.manualEntryButton.text = "Manual...";
+   this.manualEntryButton.toolTip = "Open manual RA/DEC entry dialog for the pending star click";
+   this.manualEntryButton.onClick = function () {
+      self.manualEntryForPending();
+   };
+
+   var catButtonSizer = new HorizontalSizer;
+   catButtonSizer.addStretch();
+   catButtonSizer.add(this.manualEntryButton);
+
    var catSizer = new VerticalSizer;
    catSizer.margin = 4;
    catSizer.spacing = 4;
    catSizer.add(catCategorySizer);
    catSizer.add(catSearchSizer);
    catSizer.add(this.catalogTreeBox, 100);
+   catSizer.add(catButtonSizer);
    this.catalogPanel.sizer = catSizer;
 
    // --- Preview + Catalog horizontal layout ---
@@ -1664,6 +1702,18 @@ ManualSolverDialog.prototype.onImageClicked = function (imgX, imgY) {
    // Out-of-bounds check
    if (cx < 0 || cx >= this.image.width || cy < 0 || cy >= this.image.height) return;
 
+   // Catalog panel visible -> enter pending click state
+   if (this.catalogPanel.visible) {
+      this.pendingClick = { px: cx, py: cy };
+      // Show pending marker
+      this.preview.pendingMarker = { imgX: cx, imgY: cy };
+      this.preview.viewport.update();
+      this.statusLabel.text = "Star clicked (" + cx.toFixed(1) + ", " + cy.toFixed(1)
+         + "). Select from catalog or click [Manual] for manual entry.";
+      return;
+   }
+
+   // Traditional flow: open StarEditDialog
    var starIndex = this.starPairs.length + 1;
    var starData = { px: cx, py: cy, ra: null, dec: null, name: "" };
 
@@ -1687,6 +1737,87 @@ ManualSolverDialog.prototype.editStar = function (index) {
    if (dlg.execute()) {
       this.starPairs[index] = dlg.starData;
       this.wcsResult = null;
+      this.refreshAll();
+   }
+};
+
+//----------------------------------------------------------------------------
+// Catalog pairing: pair pending click with catalog entry
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.pairWithCatalogEntry = function (node) {
+   if (!this.pendingClick) {
+      this.statusLabel.text = "Click a star in the image first, then select from catalog.";
+      return;
+   }
+
+   // Parse RA/DEC from catalog node text (compact format HH:MM / +DD:MM)
+   // Re-lookup from catalog data for full precision
+   var label = node.text(0);
+   var ra = null, dec = null, name = label;
+
+   // Search in catalog stars
+   for (var i = 0; i < CATALOG_STARS.length; i++) {
+      var s = CATALOG_STARS[i];
+      var sLabel = s.name || s.bayer;
+      if (sLabel === label) {
+         ra = s.ra;
+         dec = s.dec;
+         name = s.name || s.bayer;
+         break;
+      }
+   }
+   // Search in Messier objects
+   if (ra === null) {
+      for (var i = 0; i < MESSIER_OBJECTS.length; i++) {
+         var m = MESSIER_OBJECTS[i];
+         var mLabel = m.id;
+         if (m.name) mLabel += " " + m.name;
+         if (mLabel === label) {
+            ra = m.ra;
+            dec = m.dec;
+            name = m.id;
+            break;
+         }
+      }
+   }
+
+   if (ra === null || dec === null) {
+      this.statusLabel.text = "Could not resolve catalog entry coordinates.";
+      return;
+   }
+
+   this.starPairs.push({
+      px: this.pendingClick.px,
+      py: this.pendingClick.py,
+      ra: ra, dec: dec,
+      name: name
+   });
+   this.wcsResult = null;
+   this.clearPendingClick();
+   this.refreshAll();
+};
+
+ManualSolverDialog.prototype.clearPendingClick = function () {
+   this.pendingClick = null;
+   this.preview.pendingMarker = null;
+   this.preview.viewport.update();
+};
+
+ManualSolverDialog.prototype.manualEntryForPending = function () {
+   if (!this.pendingClick) {
+      this.statusLabel.text = "No pending star click. Click a star in the image first.";
+      return;
+   }
+
+   var starIndex = this.starPairs.length + 1;
+   var starData = { px: this.pendingClick.px, py: this.pendingClick.py, ra: null, dec: null, name: "" };
+
+   var dlg = new StarEditDialog(this, starIndex, starData);
+   if (dlg.execute()) {
+      this.starPairs.push(dlg.starData);
+      this.wcsResult = null;
+      this.clearPendingClick();
       this.refreshAll();
    }
 };
