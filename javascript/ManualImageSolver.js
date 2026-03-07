@@ -1550,7 +1550,7 @@ function ManualSolverDialog(targetWindow) {
 
    // --- Star table (TreeBox) ---
    var starTableLabel = new Label(this);
-   starTableLabel.text = "Reference Stars (minimum 4):";
+   starTableLabel.text = "Reference Stars (minimum 3):";
 
    var greekLegend = new Label(this);
    greekLegend.text = "\u03b1:Alp  \u03b2:Bet  \u03b3:Gam  \u03b4:Del  \u03b5:Eps  \u03b6:Zet  \u03b7:Eta  \u03b8:The  \u03b9:Iot  \u03ba:Kap  \u03bb:Lam  \u03bc:Mu  \u03bd:Nu  \u03be:Xi  \u03bf:Omi  \u03c0:Pi  \u03c1:Rho  \u03c3:Sig  \u03c4:Tau  \u03c5:Ups  \u03c6:Phi  \u03c7:Chi  \u03c8:Psi  \u03c9:Ome";
@@ -2279,9 +2279,9 @@ ManualSolverDialog.prototype.rebuildBitmap = function () {
 //----------------------------------------------------------------------------
 
 ManualSolverDialog.prototype.doSolve = function () {
-   if (this.starPairs.length < 4) {
+   if (this.starPairs.length < 3) {
       var mb = new MessageBox(
-         "At least 4 star pairs required (current: " + this.starPairs.length + ").",
+         "At least 3 star pairs required (current: " + this.starPairs.length + ").",
          TITLE, StdIcon_Warning, StdButton_Ok);
       mb.execute();
       return;
@@ -2620,8 +2620,8 @@ function main() {
          restoredStretchMode = sessionData.stretchMode || "linked";
          restoredRotationAngle = sessionData.rotationAngle || 0;
          restoredGridMode = sessionData.gridMode || (sessionData.smoothGrid === false ? "off" : "smooth");
-         restoredSuggestEnabled = sessionData.suggestEnabled !== false;
-         restoredMagLimit = typeof sessionData.magLimit === "number" ? sessionData.magLimit : 30;
+         restoredSuggestEnabled = sessionData.hasOwnProperty("suggestEnabled") ? sessionData.suggestEnabled !== false : true;
+         restoredMagLimit = sessionData.hasOwnProperty("magLimit") && typeof sessionData.magLimit === "number" ? sessionData.magLimit : 30;
          console.writeln("Restoring session (" + restoredStarPairs.length + " stars).");
       }
    }

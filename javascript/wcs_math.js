@@ -944,10 +944,10 @@ WCSFitter.prototype.solve = function () {
    var stars = this.stars;
    var nStars = stars.length;
 
-   if (nStars < 4) {
+   if (nStars < 3) {
       return {
          success: false,
-         message: "At least 4 star pairs required (current: " + nStars + ")"
+         message: "At least 3 star pairs required (current: " + nStars + ")"
       };
    }
 

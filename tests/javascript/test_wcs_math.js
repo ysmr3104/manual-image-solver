@@ -167,11 +167,10 @@ test("WCSFitter: 3星未満でエラー", function () {
    var fitter = new WCSFitter([
       { px: 100, py: 100, ra: 10.0, dec: 20.0 },
       { px: 200, py: 200, ra: 10.1, dec: 20.1 },
-      { px: 300, py: 300, ra: 10.2, dec: 20.2 },
    ], 1000, 1000);
    var result = fitter.solve();
-   assertFalse(result.success, "3星では失敗");
-   assertTrue(result.message.indexOf("4") >= 0, "エラーメッセージに '4' を含む");
+   assertFalse(result.success, "2星では失敗");
+   assertTrue(result.message.indexOf("3") >= 0, "エラーメッセージに '3' を含む");
 });
 
 test("WCSFitter: 不正な RA でエラー", function () {
