@@ -159,116 +159,49 @@ Haversine 公式より数値的に安定。
 
 ### 4.1 ManualSolverDialog（メインダイアログ）
 
-```mermaid
-block-beta
-  columns 5
-
-  block:toolbar:5
-    columns 9
-    Fit["Fit"]
-    Zoom11["1:1"]
-    ZoomIn["+"]
-    ZoomOut["−"]
-    RotCCW["↺"]
-    RotCW["↻"]
-    STF["STF: None / Linked / Unlinked"]
-    space
-    CatalogBtn["Catalog ☐"]
-  end
-
-  block:preview:3
-    columns 1
-    PreviewArea["Image Preview
-    (ScrollBox + Control)
-
-    Click → Star select
-    Drag → Pan
-    Wheel → Zoom
-    Green marker = registered
-    Cyan marker = pending"]
-  end
-
-  block:catalog["Catalog Panel (260px)"]:2
-    columns 1
-    CatCombo["Category ▼ Navigation Stars"]
-    CatSearch["Search ___________"]
-    CatTree["Name ── RA ── DEC ── Mag
-    Sirius ── 06:45 ── -16:42 ── -1.4
-    Vega ── 18:36 ── +38:47 ── 0.0
-    Rigel ── 05:14 ── -08:12 ── 0.2
-    (gray = already paired)"]
-    ManualBtn["Manual..."]
-  end
-
-  block:startable:5
-    columns 1
-    StarLabel["Reference Stars (minimum 4)"]
-    StarTree["# ── X ── Y ── Name ── RA ── DEC ── Residual
-    01 ── 512.3 ── 1024.1 ── Rigel ── 05 14 32 ── -08 12 06 ── 0.23 arcsec
-    02 ── 3012.0 ── 2012.5 ── Mintaka ── 05 32 00 ── -00 17 57 ── 0.15 arcsec"]
-  end
-
-  block:starbtn:5
-    columns 7
-    EditBtn["Edit..."]
-    RemoveBtn["Remove"]
-    ClearBtn["Clear All"]
-    space
-    ExportBtn["Export..."]
-    ImportBtn["Import..."]
-    space
-  end
-
-  block:footer:5
-    columns 6
-    GridMode["Grid ▼ Smooth"]
-    StatusBar["Star clicked. Select from catalog or Manual."]
-    space
-    SolveBtn["Solve"]
-    ApplyBtn["Apply"]
-    CloseBtn["Close"]
-  end
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ [Fit][1:1][+][−] [↺][↻] STF:[▶None][Linked][Unlinked]   [Catalog] │
+├────────────────────────────────┬─────────────────────────────────────┤
+│                                │ Category: [▼ Navigation Stars    ] │
+│   Image Preview                │ Search:   [____________________]   │
+│   (ScrollBox + Control)        │ ┌─────────────────────────────────┐│
+│                                │ │ Name    │ RA    │ DEC   │ Mag  ││
+│ • Click → Star select          │ │ Sirius  │ 06:45 │-16:42 │ -1.4 ││
+│ • Drag → Pan                   │ │ Vega    │ 18:36 │+38:47 │  0.0 ││
+│ • Wheel → Zoom                 │ │ Rigel   │ 05:14 │-08:12 │  0.2 ││
+│ • Green marker = registered    │ │ (gray = already paired)        ││
+│ • Cyan marker = pending        │ └─────────────────────────────────┘│
+│                                │                        [Manual...] │
+├────────────────────────────────┴─────────────────────────────────────┤
+│ Reference Stars (minimum 4):                                        │
+│ ┌──────────────────────────────────────────────────────────────────┐ │
+│ │ # │ X       │ Y       │ Name    │ RA          │ DEC         │Res│ │
+│ │01 │ 512.34  │ 1024.12 │ Rigel   │ 05 14 32.27 │ -08 12 05.9 │.23│ │
+│ │02 │ 3012.00 │ 2012.50 │ Mintaka │ 05 32 00.40 │ -00 17 56.7 │.15│ │
+│ └──────────────────────────────────────────────────────────────────┘ │
+│ [Edit...] [Remove] [Clear All]  [Export...] [Import...]              │
+│ Star clicked (512.3, 1024.1). Select from catalog or [Manual].      │
+│ Grid:[▼ Smooth]                       [Solve] [Apply] [Close]       │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 カタログパネル（右側）はツールバーの [Catalog] ボタンで表示/非表示を切替。非表示時は従来のレイアウト（画像プレビューが全幅）。
 
 ### 4.2 StarEditDialog（星座標入力）
 
-```mermaid
-block-beta
-  columns 3
-
-  block:title:3
-    Title["Reference Star #1"]
-  end
-
-  block:pixel:3
-    PixelInfo["Pixel: X=512.34  Y=1024.12"]
-  end
-
-  block:name:3
-    NameLabel["Name:"]
-    NameEdit["_______________"]
-    SearchBtn["Search"]
-  end
-
-  block:ra:3
-    RALabel["RA:"]
-    RAEdit["_______________"]
-    RAHint["(HH MM SS / deg)"]
-  end
-
-  block:dec:3
-    DECLabel["DEC:"]
-    DECEdit["_______________"]
-    DECHint["(+DD MM SS / deg)"]
-  end
-
-  block:btns:3
-    space
-    OKBtn["OK"]
-    CancelBtn["Cancel"]
-  end
+```
+┌────────────────────────────────────────────┐
+│ Reference Star #1                          │
+├────────────────────────────────────────────┤
+│ Pixel:  X = 512.34    Y = 1024.12         │
+├────────────────────────────────────────────┤
+│ Name: [______________] [Search]            │
+│ RA:   [______________] (HH MM SS / deg)    │
+│ DEC:  [______________] (+DD MM SS / deg)   │
+├────────────────────────────────────────────┤
+│                           [OK] [Cancel]    │
+└────────────────────────────────────────────┘
 ```
 
 ### 4.3 画像プレビュー
