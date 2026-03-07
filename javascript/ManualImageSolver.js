@@ -1,4 +1,4 @@
-#feature-id    ManualImageSolver : Utilities > ManualImageSolver
+#feature-id    ManualImageSolver : Astrometry > ManualImageSolver
 #feature-info  Manual plate solver: interactively identify stars in a PJSR dialog \
    and compute a TAN-projection WCS solution, then apply it to the active image.
 

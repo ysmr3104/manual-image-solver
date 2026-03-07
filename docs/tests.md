@@ -100,7 +100,7 @@ PixInsight コンソール:
 #### テスト A: 基本動作確認
 
 1. PixInsight で星野画像を開く
-2. **Script > Utilities > ManualImageSolver** を起動
+2. **Script > Astrometry > ManualImageSolver** を起動
 3. 画像コンボボックスで対象画像が選択されていることを確認
 4. 画像プレビューが表示されることを確認
 5. ズームボタン（Fit / 1:1 / + / −）が動作することを確認

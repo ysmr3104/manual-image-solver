@@ -45,7 +45,7 @@ When automatic plate solving with astrometry.net or PixInsight's ImageSolver fai
 1. Clone or download this repository
 2. In PixInsight, open **Script > Feature Scripts...**
 3. Click **Add** and select the `manual-image-solver/javascript/` directory
-4. Click **Done** — **Script > Utilities > ManualImageSolver** will appear in the menu
+4. Click **Done** — **Script > Astrometry > ManualImageSolver** will appear in the menu
 
 No Python or external packages required.
 
@@ -53,7 +53,7 @@ No Python or external packages required.
 
 ### 1. Launch the Script
 
-Open the target image in PixInsight and run **Script > Utilities > ManualImageSolver**.
+Open the target image in PixInsight and run **Script > Astrometry > ManualImageSolver**.
 
 The dialog opens with a stretched preview of the image and the catalog browser panel on the right.
 
