@@ -1390,16 +1390,7 @@ function ManualSolverDialog(targetWindow) {
    toolbarSizer.add(this.stretchUnlinkedButton);
    toolbarSizer.addStretch();
 
-   this.catalogToggleButton = new PushButton(this);
-   this.catalogToggleButton.text = "Catalog";
-   this.catalogToggleButton.toolTip = "Show/hide catalog browser panel";
-   this.catalogToggleButton.checkable = true;
-   this.catalogToggleButton.checked = false;
-   this.catalogToggleButton.onClick = function () {
-      self.catalogPanel.visible = self.catalogToggleButton.checked;
-      self.adjustToContents();
-   };
-   toolbarSizer.add(this.catalogToggleButton);
+   // Catalog toggle button removed: catalog panel is always visible
 
    // --- ImagePreviewControl ---
    this.preview = new ImagePreviewControl(this);
@@ -1412,8 +1403,7 @@ function ManualSolverDialog(targetWindow) {
 
    // --- Catalog panel ---
    this.catalogPanel = new Control(this);
-   this.catalogPanel.setFixedWidth(260);
-   this.catalogPanel.visible = false;
+   this.catalogPanel.setMinWidth(250);
 
    var catCategoryLabel = new Label(this.catalogPanel);
    catCategoryLabel.text = "Category:";
@@ -1421,6 +1411,7 @@ function ManualSolverDialog(targetWindow) {
 
    this.catalogCategoryCombo = new ComboBox(this.catalogPanel);
    this.catalogCategoryCombo.addItem("Navigation Stars");
+   this.catalogCategoryCombo.addItem("Messier Objects");
    // Add each constellation sorted by abbreviation
    var conKeys = [];
    for (var k in CONSTELLATION_LINES) {
@@ -1431,7 +1422,6 @@ function ManualSolverDialog(targetWindow) {
       var ck = conKeys[ci];
       this.catalogCategoryCombo.addItem(ck + " - " + CONSTELLATION_LINES[ck].name);
    }
-   this.catalogCategoryCombo.addItem("Messier Objects");
    this.catalogCategoryCombo.onItemSelected = function () {
       self.buildCatalogList();
    };
@@ -1449,15 +1439,17 @@ function ManualSolverDialog(targetWindow) {
    this.catalogTreeBox = new TreeBox(this.catalogPanel);
    this.catalogTreeBox.alternateRowColor = true;
    this.catalogTreeBox.headerVisible = true;
+   this.catalogTreeBox.headerSorting = true;
    this.catalogTreeBox.numberOfColumns = 4;
    this.catalogTreeBox.setHeaderText(0, "Name");
    this.catalogTreeBox.setHeaderText(1, "RA");
    this.catalogTreeBox.setHeaderText(2, "DEC");
    this.catalogTreeBox.setHeaderText(3, "Mag");
-   this.catalogTreeBox.setColumnWidth(0, 100);
+   this.catalogTreeBox.setColumnWidth(0, 115);
    this.catalogTreeBox.setColumnWidth(1, 55);
    this.catalogTreeBox.setColumnWidth(2, 55);
-   this.catalogTreeBox.setColumnWidth(3, 35);
+   this.catalogTreeBox.setColumnWidth(3, 40);
+   this.catalogTreeBox.sort(0, true); // Name ascending by default
 
    // Double-click catalog entry -> pair with pending click
    this.catalogTreeBox.onNodeDoubleClicked = function (node) {
@@ -1495,10 +1487,12 @@ function ManualSolverDialog(targetWindow) {
    this.catalogPanel.sizer = catSizer;
 
    // --- Preview + Catalog horizontal layout ---
+   // Preview gets stretch 100, catalog gets stretch 30
+   // User can resize the dialog to give more space to catalog
    var previewAreaSizer = new HorizontalSizer;
    previewAreaSizer.spacing = 4;
    previewAreaSizer.add(this.preview, 100);
-   previewAreaSizer.add(this.catalogPanel);
+   previewAreaSizer.add(this.catalogPanel, 40);
 
    // --- Star table (TreeBox) ---
    var starTableLabel = new Label(this);
@@ -1678,7 +1672,8 @@ function ManualSolverDialog(targetWindow) {
    this.sizer.addSpacing(4);
    this.sizer.add(mainButtonSizer);
 
-   this.resize(900, 800);
+   this.userResizable = true;
+   this.resize(1220, 800);
 
    // Initial display: fit to window (deferred execution)
    this.onShow = function () {
@@ -1702,27 +1697,12 @@ ManualSolverDialog.prototype.onImageClicked = function (imgX, imgY) {
    // Out-of-bounds check
    if (cx < 0 || cx >= this.image.width || cy < 0 || cy >= this.image.height) return;
 
-   // Catalog panel visible -> enter pending click state
-   if (this.catalogPanel.visible) {
-      this.pendingClick = { px: cx, py: cy };
-      // Show pending marker
-      this.preview.pendingMarker = { imgX: cx, imgY: cy };
-      this.preview.viewport.update();
-      this.statusLabel.text = "Star clicked (" + cx.toFixed(1) + ", " + cy.toFixed(1)
-         + "). Select from catalog or click [Manual] for manual entry.";
-      return;
-   }
-
-   // Traditional flow: open StarEditDialog
-   var starIndex = this.starPairs.length + 1;
-   var starData = { px: cx, py: cy, ra: null, dec: null, name: "" };
-
-   var dlg = new StarEditDialog(this, starIndex, starData);
-   if (dlg.execute()) {
-      this.starPairs.push(dlg.starData);
-      this.wcsResult = null;
-      this.refreshAll();
-   }
+   // Enter pending click state (select from catalog or use Manual... button)
+   this.pendingClick = { px: cx, py: cy };
+   this.preview.pendingMarker = { imgX: cx, imgY: cy };
+   this.preview.viewport.update();
+   this.statusLabel.text = "Star clicked (" + cx.toFixed(1) + ", " + cy.toFixed(1)
+      + "). Select from catalog or click [Manual] for manual entry.";
 };
 
 //----------------------------------------------------------------------------
@@ -1901,14 +1881,26 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
             });
          }
       }
-   } else if (catIdx <= 88) {
-      // Constellation: index 1..88 maps to conKeys[catIdx-1]
+   } else if (catIdx === 1) {
+      // Messier Objects
+      for (var i = 0; i < MESSIER_OBJECTS.length; i++) {
+         var m = MESSIER_OBJECTS[i];
+         var label = m.id;
+         if (m.name) label += " " + m.name;
+         items.push({
+            label: label,
+            ra: m.ra, dec: m.dec, mag: m.mag,
+            searchKey: (m.id + " " + m.name).toLowerCase()
+         });
+      }
+   } else {
+      // Constellation: index 2..89 maps to conKeys[catIdx-2]
       var conKeys = [];
       for (var k in CONSTELLATION_LINES) {
          if (CONSTELLATION_LINES.hasOwnProperty(k)) conKeys.push(k);
       }
       conKeys.sort();
-      var conAbbr = conKeys[catIdx - 1];
+      var conAbbr = conKeys[catIdx - 2];
       // Build HIP set for this constellation's lines
       var conHips = {};
       var lineData = CONSTELLATION_LINES[conAbbr].lines;
@@ -1927,18 +1919,6 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
             });
          }
       }
-   } else {
-      // Messier Objects
-      for (var i = 0; i < MESSIER_OBJECTS.length; i++) {
-         var m = MESSIER_OBJECTS[i];
-         var label = m.id;
-         if (m.name) label += " " + m.name;
-         items.push({
-            label: label,
-            ra: m.ra, dec: m.dec, mag: m.mag,
-            searchKey: (m.id + " " + m.name).toLowerCase()
-         });
-      }
    }
 
    // Apply search filter
@@ -1952,8 +1932,11 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
       items = filtered;
    }
 
-   // Sort by magnitude
-   items.sort(function (a, b) { return a.mag - b.mag; });
+   // Sort by name (default)
+   items.sort(function (a, b) {
+      return a.label.toLowerCase() < b.label.toLowerCase() ? -1
+           : a.label.toLowerCase() > b.label.toLowerCase() ? 1 : 0;
+   });
 
    // Populate TreeBox
    for (var i = 0; i < items.length; i++) {

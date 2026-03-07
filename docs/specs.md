@@ -11,9 +11,58 @@ Manual Image Solver は、PixInsight の PJSR（PixInsight JavaScript Runtime）
 - インデックスファイルが不足している FOV の画像
 - 極端に歪んだ画像や特殊な光学系の画像
 
-## 2. WCS フィッティングの数学
+## 2. 処理フロー概要
 
-### 2.1 TAN（gnomonic）投影
+ユーザーが画像上の星をクリックし天球座標をペアリングしてから、WCS ソリューションが画像に適用されるまでの全体的な流れを示す。
+
+### 2.1 入力
+
+- PixInsight で開かれた画像（FITS / XISF 等）
+- 最低 4 組の星ペア（ピクセル座標, 天球座標 RA/DEC）
+
+### 2.2 処理ステップ
+
+```
+1. 星の同定
+   ├─ 画像上の星をクリック → セントロイド計算でサブピクセル精度の位置を取得
+   └─ 天球座標をペアリング（カタログ選択 or Sesame 検索 or 手入力）
+
+2. TAN-only フィット（§3 詳細）
+   ├─ CRVAL 初期値: 星の 3D 単位ベクトル平均
+   ├─ CD 行列: 線形最小二乗フィット
+   └─ CRVAL 反復更新（5 回）で収束
+
+3. SIP 歪み補正の判定（§5 詳細）
+   ├─ 星数 < 6 → SIP なし（TAN-only で完了）
+   ├─ TAN-only RMS / ピクセルスケール < 5 → 近似モード（approx）
+   └─ TAN-only RMS / ピクセルスケール ≥ 5 → 補間モード（interp）
+
+4. SIP フィット（該当時）
+   ├─ CD 行列 + SIP 係数の反復精密化（最大 10 回）
+   ├─ 逆 SIP（AP, BP）の計算
+   └─ 受理判定（近似: 5% 以上改善、補間: 常に採用）
+
+5. WCS 適用（§7 詳細）
+   ├─ FITS キーワード書き込み（CRVAL, CD, CTYPE 等）
+   ├─ regenerateAstrometricSolution() で AnnotateImage 用スプライン生成
+   └─ 制御点の直接設定（Grid モードに応じた生成方式、§6 詳細）
+```
+
+### 2.3 Grid モードの役割
+
+WCS 適用の最終段階で、AnnotateImage が使用する制御点の生成方式を 3 つのモードから選択できる。SIP 多項式（特に補間モードの高次多項式）は星間で暴走する Runge 現象を起こすため、`regenerateAstrometricSolution()` が生成する制御点をそのまま使うと注釈位置がずれる。Grid モードはこの問題に対処する。
+
+| モード | 概要 |
+|---|---|
+| **Off** | 星位置は正確な TAN 投影、グリッド線は CD 線形 |
+| **Smooth** (デフォルト) | IDW 補間で星近傍は正確、遠方は CD 線形に漸近 |
+| **Linear** | 全制御点を CD 線形で生成、完全な直線グリッド |
+
+詳細は §6 を参照。
+
+## 3. WCS フィッティングの数学
+
+### 3.1 TAN（gnomonic）投影
 
 天球座標 (RA, DEC) → 標準座標 (ξ, η)（度）:
 
@@ -34,9 +83,9 @@ RA = CRVAL1 + atan2(ξ*(π/180)*sin(c), ρ*cos(CRVAL2)*cos(c) - η*(π/180)*sin(
 
 投影が不可能な場合（D ≤ 0、反対半球）は `null` を返す。
 
-### 2.2 CD 行列の線形最小二乗フィッティング
+### 3.2 CD 行列の線形最小二乗フィッティング
 
-ピクセルオフセット u_i = (px_i + 1) - CRPIX1, v_i = (height - py_i) - CRPIX2 に対し（座標変換は §2.5 参照）:
+ピクセルオフセット u_i = (px_i + 1) - CRPIX1, v_i = (height - py_i) - CRPIX2 に対し（座標変換は §3.5 参照）:
 
 ```
 ξ_i = CD1_1 * u_i + CD1_2 * v_i
@@ -60,7 +109,7 @@ CD1_2 = (Σu² × Σvξ - Σuv × Σuξ) / det
 
 CD2_1, CD2_2 も同様に η を使用して解く。
 
-### 2.3 CRVAL の決定
+### 3.3 CRVAL の決定
 
 1. **初期値**: 入力星の天球座標の 3D 単位ベクトル平均（天の極を含む画像にも正しく対応）
 2. TAN投影で標準座標を計算 → CD 行列をフィット
@@ -80,7 +129,7 @@ CRVAL2 = atan2(Vz, sqrt(Vx² + Vy²))
 
 CRVAL 反復更新ガード: 広角画像では TAN 投影の非線形性により CRVAL 更新が振動し、端の星が 90° 限界を超えることがある。更新後に全星の TAN 投影が成功するか検証し、失敗する場合は更新をスキップする。
 
-### 2.4 CRPIX
+### 3.4 CRPIX
 
 画像中心に固定（FITS 1-based）:
 ```
@@ -88,7 +137,7 @@ CRPIX1 = imageWidth / 2.0 + 0.5
 CRPIX2 = imageHeight / 2.0 + 0.5
 ```
 
-### 2.5 座標系の変換
+### 3.5 座標系の変換
 
 PixInsight のピクセル座標と標準 FITS 座標系では Y 軸の向きが異なる:
 
@@ -107,7 +156,7 @@ v = (height - py) - CRPIX2   ... Y: 上下反転 + 1-based 変換
 - `py=0`（画像上端）→ `fits_y=height`（FITS では最上行）
 - `py=height-1`（画像下端）→ `fits_y=1`（FITS では最下行）
 
-### 2.6 残差計算
+### 3.6 残差計算
 
 各星について:
 1. CD 行列で予測した標準座標を計算
@@ -124,7 +173,7 @@ RMS = sqrt(Σ(residual_i²) / N)
 pixelScale = sqrt(|CD1_1 × CD2_2 - CD1_2 × CD2_1|) × 3600 [arcsec/px]
 ```
 
-### 2.7 角距離（Vincenty 公式）
+### 3.7 角距離（Vincenty 公式）
 
 ```
 num1 = cos(DEC2) × sin(ΔRA)
@@ -135,7 +184,7 @@ separation = atan2(sqrt(num1² + num2²), den)
 
 Haversine 公式より数値的に安定。
 
-## 3. セントロイド計算
+## 4. セントロイド計算
 
 ### アルゴリズム
 
@@ -155,186 +204,13 @@ Haversine 公式より数値的に安定。
 - ノイズの多い画像: セントロイドが不安定になる
 - 失敗時はクリック座標をそのまま使用
 
-## 4. UI 設計
+## 5. SIP 歪み補正
 
-### 4.1 ManualSolverDialog（メインダイアログ）
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│ [Fit][1:1][+][−] [↺][↻] STF:[▶None][Linked][Unlinked]   [Catalog] │
-├────────────────────────────────┬─────────────────────────────────────┤
-│                                │ Category: [▼ Navigation Stars    ] │
-│   Image Preview                │ Search:   [____________________]   │
-│   (ScrollBox + Control)        │ ┌─────────────────────────────────┐│
-│                                │ │ Name    │ RA    │ DEC   │ Mag  ││
-│ • Click → Star select          │ │ Sirius  │ 06:45 │-16:42 │ -1.4 ││
-│ • Drag → Pan                   │ │ Vega    │ 18:36 │+38:47 │  0.0 ││
-│ • Wheel → Zoom                 │ │ Rigel   │ 05:14 │-08:12 │  0.2 ││
-│ • Green marker = registered    │ │ (gray = already paired)        ││
-│ • Cyan marker = pending        │ └─────────────────────────────────┘│
-│                                │                        [Manual...] │
-├────────────────────────────────┴─────────────────────────────────────┤
-│ Reference Stars (minimum 4):                                        │
-│ ┌──────────────────────────────────────────────────────────────────┐ │
-│ │ # │ X       │ Y       │ Name    │ RA          │ DEC         │Res│ │
-│ │01 │ 512.34  │ 1024.12 │ Rigel   │ 05 14 32.27 │ -08 12 05.9 │.23│ │
-│ │02 │ 3012.00 │ 2012.50 │ Mintaka │ 05 32 00.40 │ -00 17 56.7 │.15│ │
-│ └──────────────────────────────────────────────────────────────────┘ │
-│ [Edit...] [Remove] [Clear All]  [Export...] [Import...]              │
-│ Star clicked (512.3, 1024.1). Select from catalog or [Manual].      │
-│ Grid:[▼ Smooth]                       [Solve] [Apply] [Close]       │
-└──────────────────────────────────────────────────────────────────────┘
-```
-
-カタログパネル（右側）はツールバーの [Catalog] ボタンで表示/非表示を切替。非表示時は従来のレイアウト（画像プレビューが全幅）。
-
-### 4.2 StarEditDialog（星座標入力）
-
-```
-┌────────────────────────────────────────────┐
-│ Reference Star #1                          │
-├────────────────────────────────────────────┤
-│ Pixel:  X = 512.34    Y = 1024.12         │
-├────────────────────────────────────────────┤
-│ Name: [______________] [Search]            │
-│ RA:   [______________] (HH MM SS / deg)    │
-│ DEC:  [______________] (+DD MM SS / deg)   │
-├────────────────────────────────────────────┤
-│                           [OK] [Cancel]    │
-└────────────────────────────────────────────┘
-```
-
-### 4.3 画像プレビュー
-
-- `ScrollBox` 内に `Control` を配置
-- `onPaint`: `Image.render()` で取得した Bitmap を描画 + 星マーカー
-- マーカー: 赤十字（Pen 2px）+ 緑円（半径 12px）+ 黄色番号（選択中の星は拡大+白色表示）
-- ズーム: 離散ズームレベル（1/16x〜8x の 19 段階）、マウスホイールまたはボタンで操作、表示中心を基準にズーム
-- 表示回転: 0°/90°/180°/270°（CW/CCW）の表示回転。縦構図画像でウィンドウ横幅を有効活用。回転は表示のみで、クリック座標は逆回転で元画像座標に変換される。マーカー位置も正しく回転表示される
-- 操作: クリックで星選択（セントロイドスナップ）、ドラッグでパン（移動量 4px 以上でパンと判定、未満は星選択）
-- STF: None（リニア）/ Linked（全チャネル共通ストレッチ）/ Unlinked（チャネル独立ストレッチ）の 3 モード切替
-- 星テーブル: RA と DEC を独立した列で表示。ヘッダクリックでソート可能（ゼロパディング番号でソート順が正確）。ソート後も正しい星が選択・編集・削除されるよう、行番号ベースでインデックスを解決
-
-### 4.4 カタログブラウザパネル
-
-画像プレビュー右側に表示されるカタログブラウザ。ツールバーの [Catalog] トグルボタンで表示/非表示を切替。
-
-- **Category ComboBox**: "Navigation Stars" / 88 星座別（"Ori - Orion" 等）/ "Messier Objects"
-- **Search Edit**: インクリメンタルテキストフィルタ（名前で部分一致検索）
-- **TreeBox**: 天体リスト（Name / RA / DEC / Mag の 4 列）。等級順にソート
-- **RA/DEC 表示**: 省スペースのため HH:MM / ±DD:MM 形式（ペアリング時はフル精度の座標を使用）
-- **ペア済み表示**: 既にペアリングされた天体はテキストをグレー（`0x888888`）で表示
-- **Manual... ボタン**: pending 状態で StarEditDialog を開く（従来のフォールバック）
-
-固定幅 260px。パネル非表示時は画像プレビューが全幅を使用。
-
-### 4.5 カタログ選択ペアリングフロー
-
-カタログパネル表示時、画像クリック後の動作が従来の StarEditDialog ベースから以下に変更される:
-
-1. **画像クリック** → セントロイド計算 → pending 状態に遷移
-   - ステータスバー: `"Star clicked (X, Y). Select from catalog or click [Manual] for manual entry."`
-   - pending 位置にシアン色（`#00FFFF`）のマーカー（円 + 十字 + "?" ラベル）を表示
-2. **カタログ選択**: カタログ TreeBox の天体をダブルクリック → pending 位置と選択天体のペアリングが自動的に完了
-   - 天体名・RA・DEC がカタログデータから取得され、星テーブルに追加
-   - pending 状態がクリアされ、マーカーが通常の緑色に変化
-3. **手動入力フォールバック**: [Manual...] ボタンで従来の StarEditDialog を開く（カタログにない天体用）
-4. **連続クリック**: pending 中に別の星をクリックすると、前の pending を破棄して新しい位置に更新
-
-カタログパネル非表示時は従来通り StarEditDialog が直接開く（動作互換性を維持）。
-
-## 5. WCS 適用
-
-### FITS キーワード
-
-| キーワード | 型 | 値 |
-|---|---|---|
-| CTYPE1 | 文字列 | `RA---TAN` |
-| CTYPE2 | 文字列 | `DEC--TAN` |
-| CRVAL1 | 浮動小数点 | 投影中心 RA（度） |
-| CRVAL2 | 浮動小数点 | 投影中心 DEC（度） |
-| CRPIX1 | 浮動小数点 | 基準ピクセル X（1-based） |
-| CRPIX2 | 浮動小数点 | 基準ピクセル Y（1-based） |
-| CD1_1 | 浮動小数点 | CD行列要素 |
-| CD1_2 | 浮動小数点 | CD行列要素 |
-| CD2_1 | 浮動小数点 | CD行列要素 |
-| CD2_2 | 浮動小数点 | CD行列要素 |
-| CUNIT1 | 文字列 | `deg` |
-| CUNIT2 | 文字列 | `deg` |
-| RADESYS | 文字列 | `ICRS` |
-| EQUINOX | 浮動小数点 | `2000.0` |
-| PLTSOLVD | 論理値 | `T` |
-
-### 適用手順
-
-1. 既存の WCS 関連キーワードを全て除去（`isWCSKeyword()` で判定）
-2. 新しい WCS キーワードを追加（`makeFITSKeyword()` で型を自動判定）
-3. `window.regenerateAstrometricSolution()` でアストロメトリック表示を再生成
-4. 補間モード時: `setCustomControlPoints()` で制御点を直接上書き（§8.7 参照）
-
-## 6. 天体名検索（CDS Sesame）
-
-- URL: `http://cdsweb.u-strasbg.fr/cgi-bin/nph-sesame/-oI/A?<name>`
-- curl でリクエスト（タイムアウト 10秒）
-- レスポンスの `%J` 行から RA/DEC（度数）を抽出
-- オフライン時は RA/DEC 直接入力で対応
-
-## 7. 組み込みカタログデータ
-
-### 7.1 概要
-
-`catalog_data.js` に格納された組み込み天体カタログ。CDS Sesame 検索なしで天体を素早く同定するために使用する。PJSR（`#include`）と Node.js（`require`）の両方で動作する ES5 互換 JavaScript。
-
-### 7.2 データ構造
-
-| 変数名 | 型 | 内容 |
-|---|---|---|
-| `CATALOG_STARS` | Array | 星座線構成星（691 星）。各要素: `{hip, name, bayer, con, ra, dec, mag}` |
-| `CONSTELLATION_LINES` | Object | 88 星座の星座線。キー: IAU 略称。値: `{name, lines}` |
-| `NAVIGATION_STAR_HIPS` | Array | 主要ナビゲーション星の HIP 番号（50 星） |
-| `MESSIER_OBJECTS` | Array | メシエ天体 M1〜M110（110 天体）。各要素: `{id, name, type, con, ra, dec, mag}` |
-
-### 7.3 座標系
-
-- 座標系: J2000（ICRS）
-- RA: 十進度（0〜360）
-- DEC: 十進度（-90〜+90）
-- 等級: 視等級（apparent visual magnitude）
-
-### 7.4 星座線データ
-
-Stellarium western skyculture に準拠。各星座の `lines` 配列はポリライン（HIP 番号の配列）のリストで、連続する HIP 番号間が線分として接続される。
-
-```
-例: Ori (Orion)
-lines: [[26727,26311,25930], [29426,28614,27989,...], ...]
-→ HIP 26727—26311—25930 の2本の線分 + ...
-```
-
-### 7.5 メシエ天体の型略称
-
-| 略称 | 種類 |
-|---|---|
-| GC | 球状星団 (Globular Cluster) |
-| OC | 散開星団 (Open Cluster) |
-| PN | 惑星状星雲 (Planetary Nebula) |
-| DN | 散光星雲 (Diffuse Nebula) |
-| Gx | 銀河 (Galaxy) |
-| DS | 二重星 (Double Star) |
-
-### 7.6 データソース
-
-- 恒星座標: [HYG Database](https://github.com/astronexus/HYG-Database)（Hipparcos カタログ由来）
-- 星座線: [Stellarium skycultures](https://github.com/Stellarium/stellarium-skycultures)（western skyculture）
-- メシエ天体: SEDS Messier Catalog
-
-## 8. SIP 歪み補正（Phase 3 実装済み）
-
-### 8.1 概要
+### 5.1 概要
 
 SIP（Simple Imaging Polynomial）は TAN 投影の残差を高次多項式で補正する FITS 標準拡張。広角画像（FOV > 数度）で CD 行列のみでは吸収できない非線形歪みを補正する。
 
-### 8.2 SIP 多項式
+### 5.2 SIP 多項式
 
 ピクセルオフセット (u, v) = (x - CRPIX1, y - CRPIX2) に対し:
 
@@ -349,7 +225,7 @@ v' = v + B(u, v) = v + Σ B_p_q × u^p × v^q  (p+q = 2..B_ORDER)
 η  = CD2_1 × u' + CD2_2 × v'
 ```
 
-### 8.3 SIP 次数の決定
+### 5.3 SIP 次数の決定（近似モード）
 
 手動プレートソルブでは星数が限られるため、過剰フィットを避ける保守的な閾値:
 
@@ -359,9 +235,9 @@ v' = v + B(u, v) = v + Σ B_p_q × u^p × v^q  (p+q = 2..B_ORDER)
 | 6〜9 | 2 | 3 | 3 |
 | ≥ 10 | 3 | 7 | 3 |
 
-### 8.4 フィッティングアルゴリズム
+### 5.4 フィッティングアルゴリズム
 
-1. **TAN-only フィット**: 従来の CD 行列 + CRVAL 反復フィット（§2.2〜2.3）
+1. **TAN-only フィット**: 従来の CD 行列 + CRVAL 反復フィット（§3.2〜3.3）
 2. **反復 CD+SIP 精密化**（最大 10 回）:
    a. CD 逆行列で天球座標→理想ピクセルを計算し、実測ピクセルとの差を SIP ターゲットとする
    b. 座標正規化（`coordScale = max(|u|, |v|)`）で数値安定化
@@ -371,7 +247,7 @@ v' = v + B(u, v) = v + Σ B_p_q × u^p × v^q  (p+q = 2..B_ORDER)
 3. **採用判定**: SIP 後の RMS が TAN-only RMS より 5% 以上改善 **かつ** 絶対改善量 > 0.1 arcsec の場合のみ採用。それ以外は TAN-only にフォールバック
 4. **逆 SIP 計算**: 50×50 グリッドで順 SIP を評価し、逆方向の多項式 (AP, BP) を最小二乗法で計算
 
-### 8.5 FITS キーワード
+### 5.5 FITS キーワード
 
 SIP 適用時に追加されるキーワード:
 
@@ -390,7 +266,7 @@ SIP 適用時に追加されるキーワード:
 
 SIP 非適用時は従来通り `RA---TAN` / `DEC--TAN` を使用。
 
-### 8.6 精度の目安
+### 5.6 精度の目安
 
 | 状況 | 予想精度 |
 |---|---|
@@ -399,7 +275,7 @@ SIP 非適用時は従来通り `RA---TAN` / `DEC--TAN` を使用。
 | 広角（> 30°）, TAN + SIP | 1〜5 arcsec |
 | 広角（> 30°）, TAN のみ | > 10 arcsec（歪みが残る） |
 
-### 8.7 補間モード（広角画像対応）
+### 5.7 補間モード（広角画像対応）
 
 #### 背景
 
@@ -490,31 +366,31 @@ G = D D^T（m×m）を計算し、Gy = b をガウス消去法で解き、x = D^
 - ステータス: `(SIPNi)` と表示（i = interpolation）
 - 結果オブジェクトに `sipMode: "interp"` or `"approx"` を追加
 
-#### 制御点直接設定（AnnotateImage 修正）
+## 6. 制御点生成と AnnotateImage 連携
 
-##### 問題
+### 6.1 背景と目的
 
-広角画像（90° FOV 等）で補間モード（高次 SIP）を使用すると、forward SIP 多項式が制御点間で暴走する（Runge 現象）。`regenerateAstrometricSolution()` がこの暴走した forward SIP をグリッドサンプリングして制御点を生成するため、制御点が汚染される。AnnotateImage は AP/BP（逆 SIP）を使わず、制御点から構築した RBF スプラインで sky→pixel 変換するため、汚染された制御点により注釈位置がずれる。
+PixInsight の AnnotateImage プロセスは、WCS の FITS キーワード（CD 行列、SIP 多項式）を直接使用せず、画像プロパティに格納された **制御点** と **RBF スプライン** で sky→pixel 変換を行う。`regenerateAstrometricSolution()` がこの制御点を生成するが、補間モードの高次 SIP 多項式は星間で暴走（Runge 現象）するため、生成された制御点が汚染され、注釈位置がずれる。
 
-##### 解決策
+この問題に対処するため、`regenerateAstrometricSolution()` 後に制御点を直接上書きする。制御点の生成方式を **Grid モード** として 3 種類提供し、用途に応じた表示品質のバランスを選択できる。
 
-`regenerateAstrometricSolution()` 後に、画像プロパティのスプライン設定と制御点を完全に上書きする。RBF スプライン（Thin Plate Spline）は多項式と異なり Runge 振動を起こさないため、星位置では正確な注釈位置を実現し、離れた場所ではベースラインに沿って滑らかに補間する。
+### 6.2 Grid モードの比較
 
-##### Grid モード
-
-制御点の生成方式を 3 つのモードで切替可能（UI: メインダイアログ下部の ComboBox、デフォルト: Smooth）。**interp モード時のみ有効**、近似モードでは常に Off 相当の動作。
+UI のメインダイアログ下部にある ComboBox で切替（デフォルト: Smooth）。
 
 | モード | グリッド制御点 | 星制御点 | 特徴 |
 |---|---|---|---|
 | **Off** | CD 線形（星近傍 100px を除外） | 正確な TAN 投影（RA/Dec → gnomonic） | 星位置は正確だが、グリッド線が星近傍で歪む場合がある |
-| **Smooth** (default) | IDW 補正付き CD 線形 | IDW 補正付き CD 線形 | 星近傍で正確、遠方では CD 線形に漸近。バランスの良い表示 |
+| **Smooth** (デフォルト) | IDW 補正付き CD 線形 | IDW 補正付き CD 線形 | 星近傍で正確、遠方では CD 線形に漸近。バランスの良い表示 |
 | **Linear** | CD 線形（5×5 格子） | CD 線形 | 完全な直線グリッド。レンズ歪み分だけ星位置がずれる |
 
-- **Off モード**: グリッド点は 21×31 格子（最大 651 点）。星位置から半径 100px 以内のグリッド点を除外し、CD 線形値と星の正確な TAN 投影値の矛盾を回避
-- **Smooth モード**: IDW（Inverse Distance Weighting）補間で CD 線形ベースラインに星の残差を加算。星の 3D 単位ベクトル残差（正確な位置 − CD 線形位置）をガウス重み付き逆距離加重平均で各点に配分。σ は星間の平均最近傍距離。星に近いほど正確な TAN 投影値に収束し、遠いほど CD 線形値に漸近する
-- **Linear モード**: 全制御点を CD 線形で生成。レンズ歪みの影響で星の注釈位置がわずかにずれるが、グリッド線は完全な直線になる
+### 6.3 Off モード
 
-##### IDW 補間の詳細（Smooth モード）
+グリッド点は 21×31 格子（最大 651 点）で生成。星位置から半径 100px 以内のグリッド点を除外し、CD 線形値と星の正確な TAN 投影値の矛盾を回避する。星制御点には正確な gnomonic 投影座標を使用するため、星の注釈位置は正確だが、除外領域の境界でグリッド線に不連続が生じる場合がある。
+
+### 6.4 Smooth モード（IDW 補間）
+
+CD 行列による線形近似をベースラインとし、各星の残差を IDW（Inverse Distance Weighting）で周囲に配分する。星に近い点ほど正確な TAN 投影に近づき、離れた点ほど CD 線形に漸近するため、滑らかな遷移が実現する。
 
 各グリッド点 (u, v) の gnomonic 座標を以下の手順で計算:
 
@@ -529,7 +405,18 @@ G = D D^T（m×m）を計算し、Gy = b をガウス消去法で解き、x = D^
 
 σ² は星間の平均最近傍距離の二乗。星が 3 個未満の場合は IDW を無効化し CD 線形にフォールバック。
 
-##### 書き込み先プロパティ
+### 6.5 Linear モード
+
+全制御点を CD 行列の線形マッピングのみで生成。高次の歪み補正を一切含まないため、グリッド線は完全な直線になる。レンズ歪みがある画像では星の注釈位置がわずかにずれるが、見た目の整ったグリッド表示が得られる。
+
+### 6.6 適用条件
+
+- 全モード（interp / approx）で制御点の直接書き込みを実行
+- interp モードでは Grid モード設定（Off / Smooth / Linear）に従って制御点を生成
+- 近似モードでは常に Off 相当（CD+SIP グリッド + 正確な TAN 投影星）で制御点を生成
+- Grid モード設定はセッション保存・復元の対象
+
+### 6.7 書き込み先プロパティ
 
 スプライン設定プロパティ（`regenerateAstrometricSolution()` が生成した値を完全に上書き）:
 
@@ -551,60 +438,175 @@ G = D D^T（m×m）を計算し、Gy = b をガウス消去法で解き、x = D^
 
 **注意**: `ControlPoints:Weights` は PixInsight の SplineWorldTransformation の公式プロパティに存在しない。書き込むとバリデーションエラー（`invalid or corrupted control point structures`）が発生する。
 
-##### 適用条件
+## 7. WCS 適用
 
-- 全モード（interp / approx）で制御点の直接書き込みを実行
-- interp モードでは Grid モード設定（Off / Smooth / Linear）に従って制御点を生成
-- 近似モードでは常に Off 相当（CD+SIP グリッド + 正確な TAN 投影星）で制御点を生成
-- Grid モード設定はセッション保存・復元の対象
+### 7.1 FITS キーワード
 
-## 9. プロジェクト構成
+| キーワード | 型 | 値 |
+|---|---|---|
+| CTYPE1 | 文字列 | `RA---TAN` |
+| CTYPE2 | 文字列 | `DEC--TAN` |
+| CRVAL1 | 浮動小数点 | 投影中心 RA（度） |
+| CRVAL2 | 浮動小数点 | 投影中心 DEC（度） |
+| CRPIX1 | 浮動小数点 | 基準ピクセル X（1-based） |
+| CRPIX2 | 浮動小数点 | 基準ピクセル Y（1-based） |
+| CD1_1 | 浮動小数点 | CD行列要素 |
+| CD1_2 | 浮動小数点 | CD行列要素 |
+| CD2_1 | 浮動小数点 | CD行列要素 |
+| CD2_2 | 浮動小数点 | CD行列要素 |
+| CUNIT1 | 文字列 | `deg` |
+| CUNIT2 | 文字列 | `deg` |
+| RADESYS | 文字列 | `ICRS` |
+| EQUINOX | 浮動小数点 | `2000.0` |
+| PLTSOLVD | 論理値 | `T` |
+
+### 7.2 適用手順
+
+1. 既存の WCS 関連キーワードを全て除去（`isWCSKeyword()` で判定）
+2. 新しい WCS キーワードを追加（`makeFITSKeyword()` で型を自動判定）
+3. `window.regenerateAstrometricSolution()` でアストロメトリック表示を再生成
+4. 制御点の直接設定（Grid モードに応じた生成方式、§6 参照）
+
+## 8. 天体名検索（CDS Sesame）
+
+- URL: `http://cdsweb.u-strasbg.fr/cgi-bin/nph-sesame/-oI/A?<name>`
+- curl でリクエスト（タイムアウト 10秒）
+- レスポンスの `%J` 行から RA/DEC（度数）を抽出
+- オフライン時は RA/DEC 直接入力で対応
+
+## 9. UI 設計
+
+### 9.1 ManualSolverDialog（メインダイアログ）
 
 ```
-manual-image-solver/
-├── javascript/
-│   ├── ManualImageSolver.js       # PJSR メイン（ネイティブ Dialog で全操作完結）
-│   ├── WCSApplier.js              # スタンドアロン JSON → WCS 適用
-│   ├── wcs_math.js                # WCS 数学関数（PJSR + Node.js 両対応）
-│   ├── wcs_keywords.js            # FITS WCS キーワードユーティリティ（PJSR 専用）
-│   └── catalog_data.js            # 組み込みカタログデータ（PJSR + Node.js 両対応）
-├── tests/
-│   └── javascript/
-│       ├── test_wcs_math.js       # Node.js 単体テスト（WCS 数学関数）
-│       ├── test_parse_coords.js   # Node.js 単体テスト（座標パース + MTF）
-│       ├── test_catalog_data.js   # Node.js 単体テスト（カタログデータ整合性）
-│       └── ManualSolverTest.js    # PJSR 統合テスト
-├── docs/
-│   ├── setup.md                   # セットアップガイド
-│   ├── specs.md                   # 技術仕様書（本ドキュメント）
-│   ├── tests.md                   # テスト手順書
-│   └── images/                    # スクリーンショット
-├── repository/
-│   ├── ManualImageSolver-x.x.x.zip  # PixInsight リポジトリ配布用 ZIP
-│   └── updates.xri                  # PixInsight アップデート定義
-├── build-release.sh               # リリースビルドスクリプト
-└── .gitignore
+┌──────────────────────────────────────────────────────────────────────┐
+│ [Fit][1:1][+][−] [↺][↻] STF:[▶None][Linked][Unlinked]   [Catalog] │
+├────────────────────────────────┬─────────────────────────────────────┤
+│                                │ Category: [▼ Navigation Stars    ] │
+│   Image Preview                │ Search:   [____________________]   │
+│   (ScrollBox + Control)        │ ┌─────────────────────────────────┐│
+│                                │ │ Name    │ RA    │ DEC   │ Mag  ││
+│ • Click → Star select          │ │ Sirius  │ 06:45 │-16:42 │ -1.4 ││
+│ • Drag → Pan                   │ │ Vega    │ 18:36 │+38:47 │  0.0 ││
+│ • Wheel → Zoom                 │ │ Rigel   │ 05:14 │-08:12 │  0.2 ││
+│ • Green marker = registered    │ │ (gray = already paired)        ││
+│ • Cyan marker = pending        │ └─────────────────────────────────┘│
+│                                │                        [Manual...] │
+├────────────────────────────────┴─────────────────────────────────────┤
+│ Reference Stars (minimum 4):                                        │
+│ ┌──────────────────────────────────────────────────────────────────┐ │
+│ │ # │ X       │ Y       │ Name    │ RA          │ DEC         │Res│ │
+│ │01 │ 512.34  │ 1024.12 │ Rigel   │ 05 14 32.27 │ -08 12 05.9 │.23│ │
+│ │02 │ 3012.00 │ 2012.50 │ Mintaka │ 05 32 00.40 │ -00 17 56.7 │.15│ │
+│ └──────────────────────────────────────────────────────────────────┘ │
+│ [Edit...] [Remove] [Clear All]  [Export...] [Import...]              │
+│ Star clicked (512.3, 1024.1). Select from catalog or [Manual].      │
+│ Grid:[▼ Smooth]                       [Solve] [Apply] [Close]       │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-## 10. テスト
+カタログパネル（右側）はツールバーの [Catalog] ボタンで表示/非表示を切替。非表示時は従来のレイアウト（画像プレビューが全幅）。
 
-### Node.js 単体テスト
+### 9.2 StarEditDialog（星座標入力）
 
-```bash
-# WCS 数学関数の精度検証
-node tests/javascript/test_wcs_math.js
-
-# 座標パース + MTF
-node tests/javascript/test_parse_coords.js
-
-# カタログデータ整合性チェック
-node tests/javascript/test_catalog_data.js
+```
+┌────────────────────────────────────────────┐
+│ Reference Star #1                          │
+├────────────────────────────────────────────┤
+│ Pixel:  X = 512.34    Y = 1024.12         │
+├────────────────────────────────────────────┤
+│ Name: [______________] [Search]            │
+│ RA:   [______________] (HH MM SS / deg)    │
+│ DEC:  [______________] (+DD MM SS / deg)   │
+├────────────────────────────────────────────┤
+│                           [OK] [Cancel]    │
+└────────────────────────────────────────────┘
 ```
 
-### PJSR 統合テスト
+### 9.3 画像プレビュー
 
-PixInsight コンソールで実行:
+- `ScrollBox` 内に `Control` を配置
+- `onPaint`: `Image.render()` で取得した Bitmap を描画 + 星マーカー
+- マーカー: 赤十字（Pen 2px）+ 緑円（半径 12px）+ 黄色番号（選択中の星は拡大+白色表示）
+- ズーム: 離散ズームレベル（1/16x〜8x の 19 段階）、マウスホイールまたはボタンで操作、表示中心を基準にズーム
+- 表示回転: 0°/90°/180°/270°（CW/CCW）の表示回転。縦構図画像でウィンドウ横幅を有効活用。回転は表示のみで、クリック座標は逆回転で元画像座標に変換される。マーカー位置も正しく回転表示される
+- 操作: クリックで星選択（セントロイドスナップ）、ドラッグでパン（移動量 4px 以上でパンと判定、未満は星選択）
+- STF: None（リニア）/ Linked（全チャネル共通ストレッチ）/ Unlinked（チャネル独立ストレッチ）の 3 モード切替
+- 星テーブル: RA と DEC を独立した列で表示。ヘッダクリックでソート可能（ゼロパディング番号でソート順が正確）。ソート後も正しい星が選択・編集・削除されるよう、行番号ベースでインデックスを解決
 
-**Script > Run Script File...** → `tests/javascript/ManualSolverTest.js`
+### 9.4 カタログブラウザパネル
 
-WCS キーワード適用、セントロイド計算、Sesame 検索の統合テストを実行します。
+画像プレビュー右側に表示されるカタログブラウザ。ツールバーの [Catalog] トグルボタンで表示/非表示を切替。
+
+- **Category ComboBox**: "Navigation Stars" / 88 星座別（"Ori - Orion" 等）/ "Messier Objects"
+- **Search Edit**: インクリメンタルテキストフィルタ（名前で部分一致検索）
+- **TreeBox**: 天体リスト（Name / RA / DEC / Mag の 4 列）。等級順にソート
+- **RA/DEC 表示**: 省スペースのため HH:MM / ±DD:MM 形式（ペアリング時はフル精度の座標を使用）
+- **ペア済み表示**: 既にペアリングされた天体はテキストをグレー（`0x888888`）で表示
+- **Manual... ボタン**: pending 状態で StarEditDialog を開く（従来のフォールバック）
+
+固定幅 260px。パネル非表示時は画像プレビューが全幅を使用。
+
+### 9.5 カタログ選択ペアリングフロー
+
+カタログパネル表示時、画像クリック後の動作が従来の StarEditDialog ベースから以下に変更される:
+
+1. **画像クリック** → セントロイド計算 → pending 状態に遷移
+   - ステータスバー: `"Star clicked (X, Y). Select from catalog or click [Manual] for manual entry."`
+   - pending 位置にシアン色（`#00FFFF`）のマーカー（円 + 十字 + "?" ラベル）を表示
+2. **カタログ選択**: カタログ TreeBox の天体をダブルクリック → pending 位置と選択天体のペアリングが自動的に完了
+   - 天体名・RA・DEC がカタログデータから取得され、星テーブルに追加
+   - pending 状態がクリアされ、マーカーが通常の緑色に変化
+3. **手動入力フォールバック**: [Manual...] ボタンで従来の StarEditDialog を開く（カタログにない天体用）
+4. **連続クリック**: pending 中に別の星をクリックすると、前の pending を破棄して新しい位置に更新
+
+カタログパネル非表示時は従来通り StarEditDialog が直接開く（動作互換性を維持）。
+
+## 10. 組み込みカタログデータ
+
+### 10.1 概要
+
+`catalog_data.js` に格納された組み込み天体カタログ。CDS Sesame 検索なしで天体を素早く同定するために使用する。PJSR（`#include`）と Node.js（`require`）の両方で動作する ES5 互換 JavaScript。
+
+### 10.2 データ構造
+
+| 変数名 | 型 | 内容 |
+|---|---|---|
+| `CATALOG_STARS` | Array | 星座線構成星（691 星）。各要素: `{hip, name, bayer, con, ra, dec, mag}` |
+| `CONSTELLATION_LINES` | Object | 88 星座の星座線。キー: IAU 略称。値: `{name, lines}` |
+| `NAVIGATION_STAR_HIPS` | Array | 主要ナビゲーション星の HIP 番号（50 星） |
+| `MESSIER_OBJECTS` | Array | メシエ天体 M1〜M110（110 天体）。各要素: `{id, name, type, con, ra, dec, mag}` |
+
+### 10.3 座標系
+
+- 座標系: J2000（ICRS）
+- RA: 十進度（0〜360）
+- DEC: 十進度（-90〜+90）
+- 等級: 視等級（apparent visual magnitude）
+
+### 10.4 星座線データ
+
+Stellarium western skyculture に準拠。各星座の `lines` 配列はポリライン（HIP 番号の配列）のリストで、連続する HIP 番号間が線分として接続される。
+
+```
+例: Ori (Orion)
+lines: [[26727,26311,25930], [29426,28614,27989,...], ...]
+→ HIP 26727—26311—25930 の2本の線分 + ...
+```
+
+### 10.5 メシエ天体の型略称
+
+| 略称 | 種類 |
+|---|---|
+| GC | 球状星団 (Globular Cluster) |
+| OC | 散開星団 (Open Cluster) |
+| PN | 惑星状星雲 (Planetary Nebula) |
+| DN | 散光星雲 (Diffuse Nebula) |
+| Gx | 銀河 (Galaxy) |
+| DS | 二重星 (Double Star) |
+
+### 10.6 データソース
+
+- 恒星座標: [HYG Database](https://github.com/astronexus/HYG-Database)（Hipparcos カタログ由来）
+- 星座線: [Stellarium skycultures](https://github.com/Stellarium/stellarium-skycultures)（western skyculture）
+- メシエ天体: SEDS Messier Catalog
