@@ -28,7 +28,7 @@ git clone https://github.com/ysmr3104/manual-image-solver.git
 3. `manual-image-solver/javascript/` ディレクトリを選択
 4. **Done** で閉じる
 
-これで **Script > Utilities > ManualImageSolver** がメニューに追加されます。PixInsight を再起動しても保持されます。
+これで **Script > Astrometry > ManualImageSolver** がメニューに追加されます。PixInsight を再起動しても保持されます。
 
 ### Run Script File で実行する場合
 
@@ -40,7 +40,7 @@ git clone https://github.com/ysmr3104/manual-image-solver.git
 ## 3. 使い方
 
 1. PixInsight で星野画像を開く
-2. **Script > Utilities > ManualImageSolver** を起動
+2. **Script > Astrometry > ManualImageSolver** を起動
 3. Dialog 内で画像が表示される
 4. 画像上の星をクリックして選択（セントロイドスナップ付き）
 5. StarEditDialog で天体名検索または RA/DEC を直接入力

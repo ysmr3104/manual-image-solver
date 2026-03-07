@@ -1,4 +1,4 @@
-#feature-id    ManualImageSolver : Utilities > ManualImageSolver
+#feature-id    ManualImageSolver : Astrometry > ManualImageSolver
 #feature-info  Manual plate solver: interactively identify stars in a PJSR dialog \
    and compute a TAN-projection WCS solution, then apply it to the active image.
 
@@ -11,7 +11,7 @@
 // Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.2.2"
+#define VERSION "1.3.0"
 
 #include <pjsr/DataType.jsh>
 #include <pjsr/StdIcon.jsh>
@@ -27,6 +27,7 @@
 
 #include "wcs_math.js"
 #include "wcs_keywords.js"
+#include "catalog_data.js"
 
 #define TITLE "Manual Image Solver"
 
@@ -711,6 +712,7 @@ function ImagePreviewControl(parent) {
    this.zoomLevel = 1.0;      // Display zoom level
    this.starMarkers = [];     // [{imgX, imgY, index}]
    this.selectedIndex = -1;   // Currently selected marker index
+   this.pendingMarker = null; // {imgX, imgY} for pending catalog selection
    this.onImageClick = null;  // Callback: function(imgX, imgY)
 
    // Manual scroll management
@@ -791,6 +793,25 @@ function ImagePreviewControl(parent) {
             g.pen = new Pen(0xE6FFFF00);
             g.font = new Font("Helvetica", 9);
             g.drawText(vx + circleR + 2, vy - circleR + 2, "" + (i + 1));
+         }
+
+         // Draw pending click marker (cyan dashed circle)
+         if (self.pendingMarker) {
+            var pp = self.imageToDisplay(self.pendingMarker.imgX, self.pendingMarker.imgY);
+            var pvx = pp.x * self.zoomLevel - self.scrollX;
+            var pvy = pp.y * self.zoomLevel - self.scrollY;
+
+            g.pen = new Pen(0xFF00FFFF, 2);  // Cyan
+            g.drawCircle(pvx, pvy, 16);
+
+            // Crosshair
+            g.pen = new Pen(0xCC00FFFF, 1.5);
+            g.drawLine(pvx - 10, pvy, pvx + 10, pvy);
+            g.drawLine(pvx, pvy - 10, pvx, pvy + 10);
+
+            g.pen = new Pen(0xE600FFFF);
+            g.font = new Font("Helvetica", 9);
+            g.drawText(pvx + 18, pvy - 14, "?");
          }
       }
 
@@ -1256,6 +1277,7 @@ function ManualSolverDialog(targetWindow) {
    this.starPairs = [];      // [{px, py, ra, dec, name}]
    this.wcsResult = null;    // Result of WCSFitter.solve()
    this.stretchMode = "linked"; // "none" / "linked" / "unlinked"
+   this.pendingClick = null;  // {px, py} awaiting catalog selection
 
    this.windowTitle = TITLE + " v" + VERSION;
    this.minWidth = 800;
@@ -1368,6 +1390,8 @@ function ManualSolverDialog(targetWindow) {
    toolbarSizer.add(this.stretchUnlinkedButton);
    toolbarSizer.addStretch();
 
+   // Catalog toggle button removed: catalog panel is always visible
+
    // --- ImagePreviewControl ---
    this.preview = new ImagePreviewControl(this);
    this.preview.setMinSize(400, 300);
@@ -1377,9 +1401,109 @@ function ManualSolverDialog(targetWindow) {
       self.onImageClicked(imgX, imgY);
    };
 
+   // --- Catalog panel ---
+   this.catalogPanel = new Control(this);
+   this.catalogPanel.setMinWidth(250);
+
+   var catCategoryLabel = new Label(this.catalogPanel);
+   catCategoryLabel.text = "Category:";
+   catCategoryLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+
+   this.catalogCategoryCombo = new ComboBox(this.catalogPanel);
+   this.catalogCategoryCombo.addItem("Navigation Stars");
+   this.catalogCategoryCombo.addItem("Messier Objects");
+   // Add each constellation sorted by abbreviation
+   var conKeys = [];
+   for (var k in CONSTELLATION_LINES) {
+      if (CONSTELLATION_LINES.hasOwnProperty(k)) conKeys.push(k);
+   }
+   conKeys.sort();
+   for (var ci = 0; ci < conKeys.length; ci++) {
+      var ck = conKeys[ci];
+      var conLabel = ck + " - " + CONSTELLATION_LINES[ck].name;
+      if (CONSTELLATION_LINES[ck].nameJa) conLabel += " (" + CONSTELLATION_LINES[ck].nameJa + ")";
+      this.catalogCategoryCombo.addItem(conLabel);
+   }
+   this.catalogCategoryCombo.onItemSelected = function () {
+      self.buildCatalogList();
+   };
+
+   var catSearchLabel = new Label(this.catalogPanel);
+   catSearchLabel.text = "Search:";
+   catSearchLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+
+   this.catalogSearchEdit = new Edit(this.catalogPanel);
+   this.catalogSearchEdit.toolTip = "Filter by name (incremental search)";
+   this.catalogSearchEdit.onTextUpdated = function () {
+      self.buildCatalogList();
+   };
+
+   this.catalogTreeBox = new TreeBox(this.catalogPanel);
+   this.catalogTreeBox.alternateRowColor = true;
+   this.catalogTreeBox.headerVisible = true;
+   this.catalogTreeBox.headerSorting = true;
+   this.catalogTreeBox.numberOfColumns = 5;
+   this.catalogTreeBox.setHeaderText(0, "#");
+   this.catalogTreeBox.setHeaderText(1, "Name");
+   this.catalogTreeBox.setHeaderText(2, "RA");
+   this.catalogTreeBox.setHeaderText(3, "DEC");
+   this.catalogTreeBox.setHeaderText(4, "Mag");
+   this.catalogTreeBox.setColumnWidth(0, 55);
+   this.catalogTreeBox.setColumnWidth(1, 100);
+   this.catalogTreeBox.setColumnWidth(2, 48);
+   this.catalogTreeBox.setColumnWidth(3, 52);
+   this.catalogTreeBox.sort(0, true); // # ascending by default
+
+   // Double-click catalog entry -> pair with pending click
+   this.catalogTreeBox.onNodeDoubleClicked = function (node) {
+      self.pairWithCatalogEntry(node);
+   };
+
+   var catCategorySizer = new HorizontalSizer;
+   catCategorySizer.spacing = 4;
+   catCategorySizer.add(catCategoryLabel);
+   catCategorySizer.add(this.catalogCategoryCombo, 100);
+
+   var catSearchSizer = new HorizontalSizer;
+   catSearchSizer.spacing = 4;
+   catSearchSizer.add(catSearchLabel);
+   catSearchSizer.add(this.catalogSearchEdit, 100);
+
+   this.manualEntryButton = new PushButton(this.catalogPanel);
+   this.manualEntryButton.text = "Manual...";
+   this.manualEntryButton.toolTip = "Open manual RA/DEC entry dialog for the pending star click";
+   this.manualEntryButton.onClick = function () {
+      self.manualEntryForPending();
+   };
+
+   var catButtonSizer = new HorizontalSizer;
+   catButtonSizer.addStretch();
+   catButtonSizer.add(this.manualEntryButton);
+
+   var catSizer = new VerticalSizer;
+   catSizer.margin = 4;
+   catSizer.spacing = 4;
+   catSizer.add(catCategorySizer);
+   catSizer.add(catSearchSizer);
+   catSizer.add(this.catalogTreeBox, 100);
+   catSizer.add(catButtonSizer);
+   this.catalogPanel.sizer = catSizer;
+
+   // --- Preview + Catalog horizontal layout ---
+   // Preview gets stretch 100, catalog gets stretch 30
+   // User can resize the dialog to give more space to catalog
+   var previewAreaSizer = new HorizontalSizer;
+   previewAreaSizer.spacing = 4;
+   previewAreaSizer.add(this.preview, 100);
+   previewAreaSizer.add(this.catalogPanel, 40);
+
    // --- Star table (TreeBox) ---
    var starTableLabel = new Label(this);
    starTableLabel.text = "Reference Stars (minimum 4):";
+
+   var greekLegend = new Label(this);
+   greekLegend.text = "\u03b1:Alp  \u03b2:Bet  \u03b3:Gam  \u03b4:Del  \u03b5:Eps  \u03b6:Zet  \u03b7:Eta  \u03b8:The  \u03b9:Iot  \u03ba:Kap  \u03bb:Lam  \u03bc:Mu  \u03bd:Nu  \u03be:Xi  \u03bf:Omi  \u03c0:Pi  \u03c1:Rho  \u03c3:Sig  \u03c4:Tau  \u03c5:Ups  \u03c6:Phi  \u03c7:Chi  \u03c8:Psi  \u03c9:Ome";
+   greekLegend.textAlignment = TextAlign_Left | TextAlign_VertCenter;
 
    this.starTreeBox = new TreeBox(this);
    this.starTreeBox.alternateRowColor = true;
@@ -1547,19 +1671,22 @@ function ManualSolverDialog(targetWindow) {
    this.sizer.margin = 8;
    this.sizer.spacing = 6;
    this.sizer.add(toolbarSizer);
-   this.sizer.add(this.preview, 100);
+   this.sizer.add(previewAreaSizer, 100);
    this.sizer.add(starTableLabel);
+   this.sizer.add(greekLegend);
    this.sizer.add(this.starTreeBox, 50);
    this.sizer.add(starButtonSizer);
    this.sizer.add(this.statusLabel);
    this.sizer.addSpacing(4);
    this.sizer.add(mainButtonSizer);
 
-   this.resize(900, 800);
+   this.userResizable = true;
+   this.resize(1220, 800);
 
    // Initial display: fit to window (deferred execution)
    this.onShow = function () {
       self.preview.fitToWindow();
+      self.buildCatalogList();
    };
 }
 
@@ -1578,15 +1705,12 @@ ManualSolverDialog.prototype.onImageClicked = function (imgX, imgY) {
    // Out-of-bounds check
    if (cx < 0 || cx >= this.image.width || cy < 0 || cy >= this.image.height) return;
 
-   var starIndex = this.starPairs.length + 1;
-   var starData = { px: cx, py: cy, ra: null, dec: null, name: "" };
-
-   var dlg = new StarEditDialog(this, starIndex, starData);
-   if (dlg.execute()) {
-      this.starPairs.push(dlg.starData);
-      this.wcsResult = null;
-      this.refreshAll();
-   }
+   // Enter pending click state (select from catalog or use Manual... button)
+   this.pendingClick = { px: cx, py: cy };
+   this.preview.pendingMarker = { imgX: cx, imgY: cy };
+   this.preview.viewport.update();
+   this.statusLabel.text = "Star clicked (" + cx.toFixed(1) + ", " + cy.toFixed(1)
+      + "). Select from catalog or click [Manual] for manual entry.";
 };
 
 //----------------------------------------------------------------------------
@@ -1601,6 +1725,99 @@ ManualSolverDialog.prototype.editStar = function (index) {
    if (dlg.execute()) {
       this.starPairs[index] = dlg.starData;
       this.wcsResult = null;
+      this.refreshAll();
+   }
+};
+
+//----------------------------------------------------------------------------
+// Catalog pairing: pair pending click with catalog entry
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.pairWithCatalogEntry = function (node) {
+   if (!this.pendingClick) {
+      this.statusLabel.text = "Click a star in the image first, then select from catalog.";
+      return;
+   }
+
+   // Parse RA/DEC from catalog node text (compact format HH:MM / +DD:MM)
+   // Re-lookup from catalog data for full precision
+   var label = node.text(1);
+   var ra = null, dec = null, name = label;
+
+   // Extract HIP number from disambiguated labels like "Pi Ori (HIP 22509)"
+   var hipMatch = label.match(/\(HIP (\d+)\)$/);
+   // Search in catalog stars
+   for (var i = 0; i < CATALOG_STARS.length; i++) {
+      var s = CATALOG_STARS[i];
+      if (hipMatch) {
+         // Match by HIP number for disambiguated labels
+         if (s.hip === parseInt(hipMatch[1], 10)) {
+            ra = s.ra;
+            dec = s.dec;
+            name = label;
+            break;
+         }
+      } else {
+         var sLabel = s.name || s.bayer;
+         if (sLabel === label) {
+            ra = s.ra;
+            dec = s.dec;
+            name = label;
+            break;
+         }
+      }
+   }
+   // Search in Messier objects
+   if (ra === null) {
+      for (var i = 0; i < MESSIER_OBJECTS.length; i++) {
+         var m = MESSIER_OBJECTS[i];
+         var mLabel = m.id;
+         if (m.name) mLabel += " " + m.name;
+         if (mLabel === label) {
+            ra = m.ra;
+            dec = m.dec;
+            name = m.id;
+            break;
+         }
+      }
+   }
+
+   if (ra === null || dec === null) {
+      this.statusLabel.text = "Could not resolve catalog entry coordinates.";
+      return;
+   }
+
+   this.starPairs.push({
+      px: this.pendingClick.px,
+      py: this.pendingClick.py,
+      ra: ra, dec: dec,
+      name: name
+   });
+   this.wcsResult = null;
+   this.clearPendingClick();
+   this.refreshAll();
+};
+
+ManualSolverDialog.prototype.clearPendingClick = function () {
+   this.pendingClick = null;
+   this.preview.pendingMarker = null;
+   this.preview.viewport.update();
+};
+
+ManualSolverDialog.prototype.manualEntryForPending = function () {
+   if (!this.pendingClick) {
+      this.statusLabel.text = "No pending star click. Click a star in the image first.";
+      return;
+   }
+
+   var starIndex = this.starPairs.length + 1;
+   var starData = { px: this.pendingClick.px, py: this.pendingClick.py, ra: null, dec: null, name: "" };
+
+   var dlg = new StarEditDialog(this, starIndex, starData);
+   if (dlg.execute()) {
+      this.starPairs.push(dlg.starData);
+      this.wcsResult = null;
+      this.clearPendingClick();
       this.refreshAll();
    }
 };
@@ -1657,6 +1874,176 @@ ManualSolverDialog.prototype.refreshAll = function () {
 
    // Button state
    this.applyButton.enabled = (this.wcsResult !== null && this.wcsResult.success);
+
+   // Update catalog panel paired status
+   this.updateCatalogPairedStatus();
+};
+
+//----------------------------------------------------------------------------
+// Catalog panel: build list based on category and search filter
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.buildCatalogList = function () {
+   this.catalogTreeBox.clear();
+   var catIdx = this.catalogCategoryCombo.currentItem;
+   var searchText = this.catalogSearchEdit.text.trim().toLowerCase();
+   var items = [];
+
+   if (catIdx === 0) {
+      // Navigation Stars — sort by magnitude (brightest first)
+      var navStars = [];
+      for (var i = 0; i < CATALOG_STARS.length; i++) {
+         var s = CATALOG_STARS[i];
+         if (NAVIGATION_STAR_HIPS.indexOf(s.hip) >= 0) {
+            navStars.push(s);
+         }
+      }
+      navStars.sort(function (a, b) { return a.mag - b.mag; });
+      for (var i = 0; i < navStars.length; i++) {
+         var s = navStars[i];
+         items.push({
+            seq: i + 1,
+            label: s.name || s.bayer,
+            ra: s.ra, dec: s.dec, mag: s.mag,
+            searchKey: (s.name + " " + s.bayer).toLowerCase()
+         });
+      }
+   } else if (catIdx === 1) {
+      // Messier Objects — seq = Messier number (1-110)
+      for (var i = 0; i < MESSIER_OBJECTS.length; i++) {
+         var m = MESSIER_OBJECTS[i];
+         var label = m.id;
+         if (m.name) label += " " + m.name;
+         items.push({
+            seq: i + 1,
+            label: label,
+            ra: m.ra, dec: m.dec, mag: m.mag,
+            searchKey: (m.id + " " + m.name).toLowerCase()
+         });
+      }
+   } else {
+      // Constellation: index 2..89 maps to conKeys[catIdx-2]
+      var conKeys = [];
+      for (var k in CONSTELLATION_LINES) {
+         if (CONSTELLATION_LINES.hasOwnProperty(k)) conKeys.push(k);
+      }
+      conKeys.sort();
+      var conAbbr = conKeys[catIdx - 2];
+      // Build HIP set for this constellation's lines
+      var conHips = {};
+      var lineData = CONSTELLATION_LINES[conAbbr].lines;
+      for (var li = 0; li < lineData.length; li++) {
+         for (var pi = 0; pi < lineData[li].length; pi++) {
+            conHips[lineData[li][pi]] = true;
+         }
+      }
+      var conStars = [];
+      for (var i = 0; i < CATALOG_STARS.length; i++) {
+         var s = CATALOG_STARS[i];
+         if (conHips[s.hip]) {
+            conStars.push(s);
+         }
+      }
+      conStars.sort(function (a, b) { return a.mag - b.mag; });
+      // Build labels, disambiguating duplicates with HIP number
+      var conLabels = [];
+      for (var i = 0; i < conStars.length; i++) {
+         var s = conStars[i];
+         var bayer = s.bayer && s.bayer.trim() !== s.con ? s.bayer : "";
+         conLabels.push(s.name || bayer || ("HIP " + s.hip));
+      }
+      // Detect duplicate labels and append HIP to disambiguate
+      var labelCount = {};
+      for (var i = 0; i < conLabels.length; i++) {
+         labelCount[conLabels[i]] = (labelCount[conLabels[i]] || 0) + 1;
+      }
+      for (var i = 0; i < conStars.length; i++) {
+         var s = conStars[i];
+         var lbl = conLabels[i];
+         if (labelCount[lbl] > 1) {
+            lbl += " (HIP " + s.hip + ")";
+         }
+         items.push({
+            seq: i + 1,
+            label: lbl,
+            ra: s.ra, dec: s.dec, mag: s.mag,
+            searchKey: (s.name + " " + s.bayer + " HIP " + s.hip).toLowerCase()
+         });
+      }
+   }
+
+   // Apply search filter
+   if (searchText.length > 0) {
+      var filtered = [];
+      for (var i = 0; i < items.length; i++) {
+         if (items[i].searchKey.indexOf(searchText) >= 0) {
+            filtered.push(items[i]);
+         }
+      }
+      items = filtered;
+   }
+
+   // No pre-sort needed; items already in natural order with seq numbers.
+   // TreeBox headerSorting on column 0 (#) will sort by zero-padded seq.
+
+   // Populate TreeBox
+   for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      var node = new TreeBoxNode(this.catalogTreeBox);
+      // Column 0: # (zero-padded for correct string sort)
+      var seqStr = it.seq < 10 ? "00" + it.seq : it.seq < 100 ? "0" + it.seq : "" + it.seq;
+      node.setText(0, seqStr);
+      node.setText(1, it.label);
+      // Compact RA/DEC: HH:MM / +DD:MM
+      var raH = it.ra / 15.0;
+      var raHH = Math.floor(raH);
+      var raMM = Math.floor((raH - raHH) * 60);
+      node.setText(2, (raHH < 10 ? "0" : "") + raHH + ":" + (raMM < 10 ? "0" : "") + raMM);
+      var decSign = it.dec >= 0 ? "+" : "-";
+      var decAbs = Math.abs(it.dec);
+      var decDD = Math.floor(decAbs);
+      var decMM = Math.floor((decAbs - decDD) * 60);
+      node.setText(3, decSign + (decDD < 10 ? "0" : "") + decDD + ":" + (decMM < 10 ? "0" : "") + decMM);
+      node.setText(4, it.mag.toFixed(1));
+   }
+
+   this.updateCatalogPairedStatus();
+};
+
+//----------------------------------------------------------------------------
+// Catalog panel: update paired status (gray out already-paired entries)
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.updateCatalogPairedStatus = function () {
+   // Build set of paired object names (lowercase)
+   var pairedNames = {};
+   for (var i = 0; i < this.starPairs.length; i++) {
+      if (this.starPairs[i].name) {
+         pairedNames[this.starPairs[i].name.toLowerCase()] = true;
+      }
+   }
+
+   // Gray out paired entries in catalog TreeBox
+   for (var i = 0; i < this.catalogTreeBox.numberOfChildren; i++) {
+      var node = this.catalogTreeBox.child(i);
+      var label = node.text(1).toLowerCase();
+      // Exact match, or catalog label starts with paired name + space
+      // (e.g. paired "m16" matches catalog "m16 eagle nebula")
+      var isPaired = pairedNames.hasOwnProperty(label);
+      if (!isPaired) {
+         for (var pn in pairedNames) {
+            if (pairedNames.hasOwnProperty(pn) && label.indexOf(pn + " ") === 0) {
+               isPaired = true;
+               break;
+            }
+         }
+      }
+      if (isPaired) {
+         for (var c = 0; c < 5; c++) {
+            node.setTextColor(c, 0xff888888);
+         }
+      }
+   }
 };
 
 //----------------------------------------------------------------------------
@@ -1803,7 +2190,11 @@ function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, r
          name: s.name || ""
       });
    }
-   Settings.write(SETTINGS_KEY, DataType_String, JSON.stringify(data));
+   // Escape non-ASCII characters to \uXXXX for safe storage in Settings API
+   var jsonStr = JSON.stringify(data).replace(/[\u0080-\uffff]/g, function (ch) {
+      return "\\u" + ("0000" + ch.charCodeAt(0).toString(16)).slice(-4);
+   });
+   Settings.write(SETTINGS_KEY, DataType_String, jsonStr);
 }
 
 // Load session data from Settings

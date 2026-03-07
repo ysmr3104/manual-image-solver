@@ -14,7 +14,7 @@ Manual Image Solver は手動プレートソルブツール。Python 不要、Pi
 PixInsight（PJSR ネイティブ、外部プロセス不要）
 ┌─────────────────────────────────────────────┐
 │ 1. 画像を開く                                │
-│ 2. Script > Utilities > ManualImageSolver    │
+│ 2. Script > Astrometry > ManualImageSolver    │
 │ 3. Dialog 内で画像表示 + 星クリック + 座標入力  │
 │ 4. Solve（WCS フィッティング）                │
 │ 5. Apply to Image（WCS キーワード適用）       │
