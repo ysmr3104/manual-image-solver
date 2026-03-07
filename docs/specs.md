@@ -159,50 +159,113 @@ Haversine 公式より数値的に安定。
 
 ### 4.1 ManualSolverDialog（メインダイアログ）
 
-```
-+======================================================================+
-| Manual Image Solver                                        v1.3.0   |
-+----------------------------------------------------------------------+
-| [Fit][1:1][+][−] [↺][↻] STF:[▶None][Linked][Unlinked]    [Catalog] |
-+-------------------------------+--------------------------------------+
-| [ScrollBox + Control]         | Category: [▼ Navigation Stars    ]  |
-| - クリックで星選択            | Search:   [____________________]    |
-|   （セントロイドスナップ）    | +----------------------------------+|
-| - 選択済み星にマーカー表示    | | Name    | RA    | DEC   | Mag   ||
-| - pending星にシアンマーカー   | | Sirius  | 06:45 | -16:42| -1.4  ||
-| - マウスホイールでズーム      | | Vega    | 18:36 | +38:47|  0.0  ||
-| - ドラッグでパン              | | Rigel   | 05:14 | -08:12|  0.2  ||
-|                               | +----------------------------------+|
-|                               |                         [Manual...] |
-+-------------------------------+--------------------------------------+
-| Reference Stars (minimum 4):                                        |
-| # | X       | Y       | Name   | RA          | DEC         | Residual |
-| 01| 512.34  | 1024.12 | Rigel  | 05 14 32.27 | -08 12 05.9 | 0.23"  |
-| 02| 3012.00 | 2012.50 | Mintaka| 05 32 00.40 | -00 17 56.7 | 0.15"  |
-+----------------------------------------------------------------------+
-| [Edit...] [Remove] [Clear All]  [Export...] [Import...]              |
-+----------------------------------------------------------------------+
-| Star clicked (512.3, 1024.1). Select from catalog or [Manual].      |
-| Grid:[▼...]                          [Solve] [Apply] [Close]        |
-+======================================================================+
+```mermaid
+block-beta
+  columns 5
+
+  block:toolbar:5
+    columns 10
+    Fit["Fit"]
+    Zoom11["1:1"]
+    ZoomIn["+"]
+    ZoomOut["−"]
+    RotCCW["↺"]
+    RotCW["↻"]
+    STF["STF: None | Linked | Unlinked"]
+    space
+    CatalogBtn["Catalog ☐"]
+  end
+
+  block:preview:3
+    columns 1
+    PreviewArea["Image Preview\n(ScrollBox + Control)\n\n• クリック → 星選択（セントロイドスナップ）\n• ドラッグ → パン\n• ホイール → ズーム\n• 選択済み星: 緑○ + 赤十字\n• pending星: シアン○ + '?'"]
+  end
+
+  block:catalog["Catalog Panel (260px, toggle)"]:2
+    columns 1
+    CatCombo["Category: ▼ Navigation Stars"]
+    CatSearch["Search: ___________"]
+    CatTree["Name    | RA    | DEC   | Mag\nSirius  | 06:45 | -16:42| -1.4\nVega    | 18:36 | +38:47|  0.0\nRigel   | 05:14 | -08:12|  0.2\n(gray = paired)"]
+    ManualBtn["Manual..."]
+  end
+
+  block:starlabel:5
+    columns 1
+    StarLabel["Reference Stars (minimum 4):"]
+  end
+
+  block:startable:5
+    columns 1
+    StarTree["#  | X       | Y       | Name    | RA          | DEC         | Residual\n01 | 512.34  | 1024.12 | Rigel   | 05 14 32.27 | -08 12 05.9 | 0.23\"\n02 | 3012.00 | 2012.50 | Mintaka | 05 32 00.40 | -00 17 56.7 | 0.15\""]
+  end
+
+  block:starbtn:5
+    columns 8
+    EditBtn["Edit..."]
+    RemoveBtn["Remove"]
+    ClearBtn["Clear All"]
+    space
+    ExportBtn["Export..."]
+    ImportBtn["Import..."]
+    space:2
+  end
+
+  block:footer:5
+    columns 8
+    GridMode["Grid: ▼ Smooth"]
+    space:3
+    StatusBar["Star clicked. Select from catalog or Manual."]
+    SolveBtn["Solve"]
+    ApplyBtn["Apply"]
+    CloseBtn["Close"]
+  end
 ```
 
 カタログパネル（右側）はツールバーの [Catalog] ボタンで表示/非表示を切替。非表示時は従来のレイアウト（画像プレビューが全幅）。
 
 ### 4.2 StarEditDialog（星座標入力）
 
-```
-+============================================+
-| Reference Star #1                          |
-+--------------------------------------------+
-| Pixel:  X = 512.34    Y = 1024.12         |
-+--------------------------------------------+
-| Name: [______________] [Search]            |
-| RA:   [______________] (HH MM SS / deg)    |
-| DEC:  [______________] (+DD MM SS / deg)   |
-+--------------------------------------------+
-|                           [OK] [Cancel]    |
-+============================================+
+```mermaid
+block-beta
+  columns 3
+
+  block:title:3
+    columns 1
+    Title["Reference Star #1"]
+  end
+
+  block:pixel:3
+    columns 1
+    PixelInfo["Pixel:  X = 512.34    Y = 1024.12"]
+  end
+
+  block:name:3
+    columns 3
+    NameLabel["Name:"]
+    NameEdit["_______________"]
+    SearchBtn["Search"]
+  end
+
+  block:ra:3
+    columns 3
+    RALabel["RA:"]
+    RAEdit["_______________"]
+    RAHint["(HH MM SS / deg)"]
+  end
+
+  block:dec:3
+    columns 3
+    DECLabel["DEC:"]
+    DECEdit["_______________"]
+    DECHint["(+DD MM SS / deg)"]
+  end
+
+  block:btns:3
+    columns 3
+    space
+    OKBtn["OK"]
+    CancelBtn["Cancel"]
+  end
 ```
 
 ### 4.3 画像プレビュー
