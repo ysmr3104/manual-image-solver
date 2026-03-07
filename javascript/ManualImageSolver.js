@@ -1737,15 +1737,27 @@ ManualSolverDialog.prototype.pairWithCatalogEntry = function (node) {
    var label = node.text(1);
    var ra = null, dec = null, name = label;
 
+   // Extract HIP number from disambiguated labels like "Pi Ori (HIP 22509)"
+   var hipMatch = label.match(/\(HIP (\d+)\)$/);
    // Search in catalog stars
    for (var i = 0; i < CATALOG_STARS.length; i++) {
       var s = CATALOG_STARS[i];
-      var sLabel = s.name || s.bayer;
-      if (sLabel === label) {
-         ra = s.ra;
-         dec = s.dec;
-         name = s.name || s.bayer;
-         break;
+      if (hipMatch) {
+         // Match by HIP number for disambiguated labels
+         if (s.hip === parseInt(hipMatch[1], 10)) {
+            ra = s.ra;
+            dec = s.dec;
+            name = label;
+            break;
+         }
+      } else {
+         var sLabel = s.name || s.bayer;
+         if (sLabel === label) {
+            ra = s.ra;
+            dec = s.dec;
+            name = label;
+            break;
+         }
       }
    }
    // Search in Messier objects
@@ -1926,11 +1938,27 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
          }
       }
       conStars.sort(function (a, b) { return a.mag - b.mag; });
+      // Build labels, disambiguating duplicates with HIP number
+      var conLabels = [];
       for (var i = 0; i < conStars.length; i++) {
          var s = conStars[i];
+         var bayer = s.bayer && s.bayer.trim() !== s.con ? s.bayer : "";
+         conLabels.push(s.name || bayer || ("HIP " + s.hip));
+      }
+      // Detect duplicate labels and append HIP to disambiguate
+      var labelCount = {};
+      for (var i = 0; i < conLabels.length; i++) {
+         labelCount[conLabels[i]] = (labelCount[conLabels[i]] || 0) + 1;
+      }
+      for (var i = 0; i < conStars.length; i++) {
+         var s = conStars[i];
+         var lbl = conLabels[i];
+         if (labelCount[lbl] > 1) {
+            lbl += " (HIP " + s.hip + ")";
+         }
          items.push({
             seq: i + 1,
-            label: s.name || s.bayer || ("HIP " + s.hip),
+            label: lbl,
             ra: s.ra, dec: s.dec, mag: s.mag,
             searchKey: (s.name + " " + s.bayer + " HIP " + s.hip).toLowerCase()
          });
@@ -1992,14 +2020,7 @@ ManualSolverDialog.prototype.updateCatalogPairedStatus = function () {
    for (var i = 0; i < this.catalogTreeBox.numberOfChildren; i++) {
       var node = this.catalogTreeBox.child(i);
       var label = node.text(1).toLowerCase();
-      // Check if any paired name matches the beginning of the label
-      var isPaired = false;
-      for (var pn in pairedNames) {
-         if (pairedNames.hasOwnProperty(pn) && label.indexOf(pn) >= 0) {
-            isPaired = true;
-            break;
-         }
-      }
+      var isPaired = pairedNames.hasOwnProperty(label) && pairedNames[label];
       if (isPaired) {
          for (var c = 0; c < 5; c++) {
             node.setTextColor(c, 0xff888888);
@@ -2152,7 +2173,11 @@ function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, r
          name: s.name || ""
       });
    }
-   Settings.write(SETTINGS_KEY, DataType_String, JSON.stringify(data));
+   // Escape non-ASCII characters to \uXXXX for safe storage in Settings API
+   var jsonStr = JSON.stringify(data).replace(/[\u0080-\uffff]/g, function (ch) {
+      return "\\u" + ("0000" + ch.charCodeAt(0).toString(16)).slice(-4);
+   });
+   Settings.write(SETTINGS_KEY, DataType_String, jsonStr);
 }
 
 // Load session data from Settings
