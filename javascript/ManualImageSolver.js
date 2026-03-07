@@ -27,6 +27,7 @@
 
 #include "wcs_math.js"
 #include "wcs_keywords.js"
+#include "catalog_data.js"
 
 #define TITLE "Manual Image Solver"
 
@@ -1368,6 +1369,17 @@ function ManualSolverDialog(targetWindow) {
    toolbarSizer.add(this.stretchUnlinkedButton);
    toolbarSizer.addStretch();
 
+   this.catalogToggleButton = new PushButton(this);
+   this.catalogToggleButton.text = "Catalog";
+   this.catalogToggleButton.toolTip = "Show/hide catalog browser panel";
+   this.catalogToggleButton.checkable = true;
+   this.catalogToggleButton.checked = false;
+   this.catalogToggleButton.onClick = function () {
+      self.catalogPanel.visible = self.catalogToggleButton.checked;
+      self.adjustToContents();
+   };
+   toolbarSizer.add(this.catalogToggleButton);
+
    // --- ImagePreviewControl ---
    this.preview = new ImagePreviewControl(this);
    this.preview.setMinSize(400, 300);
@@ -1376,6 +1388,79 @@ function ManualSolverDialog(targetWindow) {
    this.preview.onImageClick = function (imgX, imgY) {
       self.onImageClicked(imgX, imgY);
    };
+
+   // --- Catalog panel ---
+   this.catalogPanel = new Control(this);
+   this.catalogPanel.setFixedWidth(260);
+   this.catalogPanel.visible = false;
+
+   var catCategoryLabel = new Label(this.catalogPanel);
+   catCategoryLabel.text = "Category:";
+   catCategoryLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+
+   this.catalogCategoryCombo = new ComboBox(this.catalogPanel);
+   this.catalogCategoryCombo.addItem("Navigation Stars");
+   // Add each constellation sorted by abbreviation
+   var conKeys = [];
+   for (var k in CONSTELLATION_LINES) {
+      if (CONSTELLATION_LINES.hasOwnProperty(k)) conKeys.push(k);
+   }
+   conKeys.sort();
+   for (var ci = 0; ci < conKeys.length; ci++) {
+      var ck = conKeys[ci];
+      this.catalogCategoryCombo.addItem(ck + " - " + CONSTELLATION_LINES[ck].name);
+   }
+   this.catalogCategoryCombo.addItem("Messier Objects");
+   this.catalogCategoryCombo.onItemSelected = function () {
+      self.buildCatalogList();
+   };
+
+   var catSearchLabel = new Label(this.catalogPanel);
+   catSearchLabel.text = "Search:";
+   catSearchLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+
+   this.catalogSearchEdit = new Edit(this.catalogPanel);
+   this.catalogSearchEdit.toolTip = "Filter by name (incremental search)";
+   this.catalogSearchEdit.onTextUpdated = function () {
+      self.buildCatalogList();
+   };
+
+   this.catalogTreeBox = new TreeBox(this.catalogPanel);
+   this.catalogTreeBox.alternateRowColor = true;
+   this.catalogTreeBox.headerVisible = true;
+   this.catalogTreeBox.numberOfColumns = 4;
+   this.catalogTreeBox.setHeaderText(0, "Name");
+   this.catalogTreeBox.setHeaderText(1, "RA");
+   this.catalogTreeBox.setHeaderText(2, "DEC");
+   this.catalogTreeBox.setHeaderText(3, "Mag");
+   this.catalogTreeBox.setColumnWidth(0, 100);
+   this.catalogTreeBox.setColumnWidth(1, 55);
+   this.catalogTreeBox.setColumnWidth(2, 55);
+   this.catalogTreeBox.setColumnWidth(3, 35);
+
+   var catCategorySizer = new HorizontalSizer;
+   catCategorySizer.spacing = 4;
+   catCategorySizer.add(catCategoryLabel);
+   catCategorySizer.add(this.catalogCategoryCombo, 100);
+
+   var catSearchSizer = new HorizontalSizer;
+   catSearchSizer.spacing = 4;
+   catSearchSizer.add(catSearchLabel);
+   catSearchSizer.add(this.catalogSearchEdit, 100);
+
+   var catSizer = new VerticalSizer;
+   catSizer.margin = 4;
+   catSizer.spacing = 4;
+   catSizer.add(catCategorySizer);
+   catSizer.add(catSearchSizer);
+   catSizer.add(this.catalogTreeBox, 100);
+   this.catalogPanel.sizer = catSizer;
+
+   // --- Preview + Catalog horizontal layout ---
+   var previewAreaSizer = new HorizontalSizer;
+   previewAreaSizer.spacing = 4;
+   previewAreaSizer.add(this.preview, 100);
+   previewAreaSizer.add(this.catalogPanel);
 
    // --- Star table (TreeBox) ---
    var starTableLabel = new Label(this);
@@ -1547,7 +1632,7 @@ function ManualSolverDialog(targetWindow) {
    this.sizer.margin = 8;
    this.sizer.spacing = 6;
    this.sizer.add(toolbarSizer);
-   this.sizer.add(this.preview, 100);
+   this.sizer.add(previewAreaSizer, 100);
    this.sizer.add(starTableLabel);
    this.sizer.add(this.starTreeBox, 50);
    this.sizer.add(starButtonSizer);
@@ -1560,6 +1645,7 @@ function ManualSolverDialog(targetWindow) {
    // Initial display: fit to window (deferred execution)
    this.onShow = function () {
       self.preview.fitToWindow();
+      self.buildCatalogList();
    };
 }
 
@@ -1657,6 +1743,139 @@ ManualSolverDialog.prototype.refreshAll = function () {
 
    // Button state
    this.applyButton.enabled = (this.wcsResult !== null && this.wcsResult.success);
+
+   // Update catalog panel paired status
+   this.updateCatalogPairedStatus();
+};
+
+//----------------------------------------------------------------------------
+// Catalog panel: build list based on category and search filter
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.buildCatalogList = function () {
+   this.catalogTreeBox.clear();
+   var catIdx = this.catalogCategoryCombo.currentItem;
+   var searchText = this.catalogSearchEdit.text.trim().toLowerCase();
+   var items = [];
+
+   if (catIdx === 0) {
+      // Navigation Stars
+      for (var i = 0; i < CATALOG_STARS.length; i++) {
+         var s = CATALOG_STARS[i];
+         if (NAVIGATION_STAR_HIPS.indexOf(s.hip) >= 0) {
+            items.push({
+               label: s.name || s.bayer,
+               ra: s.ra, dec: s.dec, mag: s.mag,
+               searchKey: (s.name + " " + s.bayer).toLowerCase()
+            });
+         }
+      }
+   } else if (catIdx <= 88) {
+      // Constellation: index 1..88 maps to conKeys[catIdx-1]
+      var conKeys = [];
+      for (var k in CONSTELLATION_LINES) {
+         if (CONSTELLATION_LINES.hasOwnProperty(k)) conKeys.push(k);
+      }
+      conKeys.sort();
+      var conAbbr = conKeys[catIdx - 1];
+      // Build HIP set for this constellation's lines
+      var conHips = {};
+      var lineData = CONSTELLATION_LINES[conAbbr].lines;
+      for (var li = 0; li < lineData.length; li++) {
+         for (var pi = 0; pi < lineData[li].length; pi++) {
+            conHips[lineData[li][pi]] = true;
+         }
+      }
+      for (var i = 0; i < CATALOG_STARS.length; i++) {
+         var s = CATALOG_STARS[i];
+         if (conHips[s.hip]) {
+            items.push({
+               label: s.name || s.bayer || ("HIP " + s.hip),
+               ra: s.ra, dec: s.dec, mag: s.mag,
+               searchKey: (s.name + " " + s.bayer + " HIP " + s.hip).toLowerCase()
+            });
+         }
+      }
+   } else {
+      // Messier Objects
+      for (var i = 0; i < MESSIER_OBJECTS.length; i++) {
+         var m = MESSIER_OBJECTS[i];
+         var label = m.id;
+         if (m.name) label += " " + m.name;
+         items.push({
+            label: label,
+            ra: m.ra, dec: m.dec, mag: m.mag,
+            searchKey: (m.id + " " + m.name).toLowerCase()
+         });
+      }
+   }
+
+   // Apply search filter
+   if (searchText.length > 0) {
+      var filtered = [];
+      for (var i = 0; i < items.length; i++) {
+         if (items[i].searchKey.indexOf(searchText) >= 0) {
+            filtered.push(items[i]);
+         }
+      }
+      items = filtered;
+   }
+
+   // Sort by magnitude
+   items.sort(function (a, b) { return a.mag - b.mag; });
+
+   // Populate TreeBox
+   for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      var node = new TreeBoxNode(this.catalogTreeBox);
+      node.setText(0, it.label);
+      // Compact RA/DEC: HH:MM / +DD:MM
+      var raH = it.ra / 15.0;
+      var raHH = Math.floor(raH);
+      var raMM = Math.floor((raH - raHH) * 60);
+      node.setText(1, (raHH < 10 ? "0" : "") + raHH + ":" + (raMM < 10 ? "0" : "") + raMM);
+      var decSign = it.dec >= 0 ? "+" : "-";
+      var decAbs = Math.abs(it.dec);
+      var decDD = Math.floor(decAbs);
+      var decMM = Math.floor((decAbs - decDD) * 60);
+      node.setText(2, decSign + (decDD < 10 ? "0" : "") + decDD + ":" + (decMM < 10 ? "0" : "") + decMM);
+      node.setText(3, it.mag.toFixed(1));
+   }
+
+   this.updateCatalogPairedStatus();
+};
+
+//----------------------------------------------------------------------------
+// Catalog panel: update paired status (gray out already-paired entries)
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.updateCatalogPairedStatus = function () {
+   // Build set of paired object names (lowercase)
+   var pairedNames = {};
+   for (var i = 0; i < this.starPairs.length; i++) {
+      if (this.starPairs[i].name) {
+         pairedNames[this.starPairs[i].name.toLowerCase()] = true;
+      }
+   }
+
+   // Gray out paired entries in catalog TreeBox
+   for (var i = 0; i < this.catalogTreeBox.numberOfChildren; i++) {
+      var node = this.catalogTreeBox.child(i);
+      var label = node.text(0).toLowerCase();
+      // Check if any paired name matches the beginning of the label
+      var isPaired = false;
+      for (var pn in pairedNames) {
+         if (pairedNames.hasOwnProperty(pn) && label.indexOf(pn) >= 0) {
+            isPaired = true;
+            break;
+         }
+      }
+      if (isPaired) {
+         for (var c = 0; c < 4; c++) {
+            node.setTextColor(c, 0xff888888);
+         }
+      }
+   }
 };
 
 //----------------------------------------------------------------------------
