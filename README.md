@@ -1,6 +1,6 @@
 [日本語](README.ja.md)
 
-# Manual Image Solver v1.3.0
+# Manual Image Solver v1.3.1
 
 A manual plate solving tool for PixInsight. Manually identify stars on an image to compute and apply a TAN (gnomonic) projection WCS (World Coordinate System).
 
@@ -27,6 +27,7 @@ When automatic plate solving with astrometry.net or PixInsight's ImageSolver fai
 - **Export / Import**: Save and load star pair data as JSON files
 - **Sesame search**: Auto-resolve RA/DEC from object names via the CDS Sesame database
 - **Centroid calculation**: Auto-snap to star centers using intensity-weighted centroid
+- **Candidate star suggestion**: After solving, catalog stars are projected onto the image as orange markers — click near one to auto-highlight it in the catalog list for quick pairing
 
 ## Installation
 

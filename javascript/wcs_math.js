@@ -944,10 +944,10 @@ WCSFitter.prototype.solve = function () {
    var stars = this.stars;
    var nStars = stars.length;
 
-   if (nStars < 4) {
+   if (nStars < 3) {
       return {
          success: false,
-         message: "At least 4 star pairs required (current: " + nStars + ")"
+         message: "At least 3 star pairs required (current: " + nStars + ")"
       };
    }
 
@@ -1273,6 +1273,35 @@ WCSFitter.prototype.solve = function () {
 };
 
 //----------------------------------------------------------------------------
+// Sky to pixel conversion: RA/DEC -> pixel coordinates using WCS result
+//   ra, dec: celestial coordinates in degrees
+//   wcsResult: object with crval1, crval2, crpix1, crpix2, cd (2x2 matrix)
+//   imageHeight: image height in pixels
+//   Returns: {px, py} in 0-based PixInsight coordinates, or null if on opposite hemisphere
+//----------------------------------------------------------------------------
+function skyToPixel(ra, dec, wcsResult, imageHeight) {
+   var proj = tanProject([wcsResult.crval1, wcsResult.crval2], [ra, dec]);
+   if (!proj) return null;
+
+   var xi = proj[0];
+   var eta = proj[1];
+
+   // CD inverse matrix
+   var cd = wcsResult.cd;
+   var det = cd[0][0] * cd[1][1] - cd[0][1] * cd[1][0];
+   if (Math.abs(det) < 1e-30) return null;
+
+   var u = (cd[1][1] * xi - cd[0][1] * eta) / det;
+   var v = (-cd[1][0] * xi + cd[0][0] * eta) / det;
+
+   // FITS -> PixInsight coordinate conversion
+   var px = u + wcsResult.crpix1 - 1;
+   var py = imageHeight - (v + wcsResult.crpix2);
+
+   return { px: px, py: py };
+}
+
+//----------------------------------------------------------------------------
 // Centroid computation (intensity-weighted center of gravity)
 //
 // Uses Image.sample(x, y, channel) in the PJSR environment.
@@ -1341,6 +1370,7 @@ if (typeof module !== "undefined") {
       evalSipPolynomial: evalSipPolynomial,
       determineSipOrder: determineSipOrder,
       WCSFitter: WCSFitter,
-      computeCentroid: computeCentroid
+      computeCentroid: computeCentroid,
+      skyToPixel: skyToPixel
    };
 }

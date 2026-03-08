@@ -11,7 +11,7 @@
 // Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.3.0"
+#define VERSION "1.3.1"
 
 #include <pjsr/DataType.jsh>
 #include <pjsr/StdIcon.jsh>
@@ -768,6 +768,26 @@ function ImagePreviewControl(parent) {
                      dispW - self.scrollX, dispH - self.scrollY),
             dbmp);
 
+         // Draw candidate star markers (orange crosses, drawn before registered markers)
+         if (self.candidateMarkers) {
+            var viewW = this.width;
+            var viewH = this.height;
+            for (var ci = 0; ci < self.candidateMarkers.length; ci++) {
+               var cm = self.candidateMarkers[ci];
+               var dp = self.imageToDisplay(cm.px, cm.py);
+               var cvx = dp.x * self.zoomLevel - self.scrollX;
+               var cvy = dp.y * self.zoomLevel - self.scrollY;
+               if (cvx < -20 || cvy < -20 || cvx > viewW + 20 || cvy > viewH + 20) continue;
+               g.pen = new Pen(0xCCFF8C00, 1.0);
+               var cr = 6;
+               g.drawLine(cvx - cr, cvy, cvx + cr, cvy);
+               g.drawLine(cvx, cvy - cr, cvx, cvy + cr);
+               g.pen = new Pen(0xAAFF8C00);
+               g.font = new Font("Helvetica", 8);
+               g.drawText(cvx + 8, cvy - 2, cm.label);
+            }
+         }
+
          // Draw markers
          for (var i = 0; i < self.starMarkers.length; i++) {
             var mk = self.starMarkers[i];
@@ -1442,16 +1462,18 @@ function ManualSolverDialog(targetWindow) {
    this.catalogTreeBox.alternateRowColor = true;
    this.catalogTreeBox.headerVisible = true;
    this.catalogTreeBox.headerSorting = true;
-   this.catalogTreeBox.numberOfColumns = 5;
+   this.catalogTreeBox.numberOfColumns = 6;
    this.catalogTreeBox.setHeaderText(0, "#");
    this.catalogTreeBox.setHeaderText(1, "Name");
    this.catalogTreeBox.setHeaderText(2, "RA");
    this.catalogTreeBox.setHeaderText(3, "DEC");
    this.catalogTreeBox.setHeaderText(4, "Mag");
+   this.catalogTreeBox.setHeaderText(5, "Category");
    this.catalogTreeBox.setColumnWidth(0, 55);
    this.catalogTreeBox.setColumnWidth(1, 100);
    this.catalogTreeBox.setColumnWidth(2, 48);
    this.catalogTreeBox.setColumnWidth(3, 52);
+   this.catalogTreeBox.setColumnWidth(4, 48);
    this.catalogTreeBox.sort(0, true); // # ascending by default
 
    // Double-click catalog entry -> pair with pending click
@@ -1480,11 +1502,42 @@ function ManualSolverDialog(targetWindow) {
    catButtonSizer.addStretch();
    catButtonSizer.add(this.manualEntryButton);
 
+   // --- Candidate suggestion controls ---
+   this.suggestCheckBox = new CheckBox(this.catalogPanel);
+   this.suggestCheckBox.text = "Suggest";
+   this.suggestCheckBox.checked = true;
+   this.suggestCheckBox.toolTip = "Show candidate star markers on the image after solving";
+   this.suggestCheckBox.onCheck = function () {
+      self.updateCandidateStars();
+   };
+
+   var magLimitLabel = new Label(this.catalogPanel);
+   magLimitLabel.text = "Mag \u2264";
+   magLimitLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+
+   this.magLimitSpinBox = new SpinBox(this.catalogPanel);
+   this.magLimitSpinBox.minValue = 0;
+   this.magLimitSpinBox.maxValue = 80;
+   this.magLimitSpinBox.value = 30;
+   this.magLimitSpinBox.toolTip = "Magnitude limit for candidate stars (x10, e.g. 30 = mag 3.0)";
+   this.magLimitSpinBox.onValueUpdated = function () {
+      self.updateCandidateStars();
+   };
+
+   var candidateSizer = new HorizontalSizer;
+   candidateSizer.spacing = 4;
+   candidateSizer.add(this.suggestCheckBox);
+   candidateSizer.addSpacing(8);
+   candidateSizer.add(magLimitLabel);
+   candidateSizer.add(this.magLimitSpinBox);
+   candidateSizer.addStretch();
+
    var catSizer = new VerticalSizer;
    catSizer.margin = 4;
    catSizer.spacing = 4;
    catSizer.add(catCategorySizer);
    catSizer.add(catSearchSizer);
+   catSizer.add(candidateSizer);
    catSizer.add(this.catalogTreeBox, 100);
    catSizer.add(catButtonSizer);
    this.catalogPanel.sizer = catSizer;
@@ -1499,7 +1552,7 @@ function ManualSolverDialog(targetWindow) {
 
    // --- Star table (TreeBox) ---
    var starTableLabel = new Label(this);
-   starTableLabel.text = "Reference Stars (minimum 4):";
+   starTableLabel.text = "Reference Stars (minimum 3):";
 
    var greekLegend = new Label(this);
    greekLegend.text = "\u03b1:Alp  \u03b2:Bet  \u03b3:Gam  \u03b4:Del  \u03b5:Eps  \u03b6:Zet  \u03b7:Eta  \u03b8:The  \u03b9:Iot  \u03ba:Kap  \u03bb:Lam  \u03bc:Mu  \u03bd:Nu  \u03be:Xi  \u03bf:Omi  \u03c0:Pi  \u03c1:Rho  \u03c3:Sig  \u03c4:Tau  \u03c5:Ups  \u03c6:Phi  \u03c7:Chi  \u03c8:Psi  \u03c9:Ome";
@@ -1711,6 +1764,9 @@ ManualSolverDialog.prototype.onImageClicked = function (imgX, imgY) {
    this.preview.viewport.update();
    this.statusLabel.text = "Star clicked (" + cx.toFixed(1) + ", " + cy.toFixed(1)
       + "). Select from catalog or click [Manual] for manual entry.";
+
+   // Highlight nearest candidates in catalog
+   this.highlightNearestCandidates(cx, cy);
 };
 
 //----------------------------------------------------------------------------
@@ -1794,7 +1850,9 @@ ManualSolverDialog.prototype.pairWithCatalogEntry = function (node) {
       name: name
    });
    this.wcsResult = null;
+   this.candidateRanking = null;
    this.clearPendingClick();
+   this.updateCandidateStars();
    this.refreshAll();
 };
 
@@ -1841,9 +1899,16 @@ ManualSolverDialog.prototype.refreshAll = function () {
       node.setText(4, raToHMS(s.ra));
       node.setText(5, decToDMS(s.dec));
 
-      // Residual
+      // Residual: show "-" when residual is always zero by definition
+      // (exact fit with 3 stars, or SIP interp mode)
       if (this.wcsResult && this.wcsResult.residuals && this.wcsResult.residuals[i]) {
-         node.setText(6, this.wcsResult.residuals[i].residual_arcsec.toFixed(2) + "\"");
+         var alwaysZero = this.starPairs.length <= 3
+            || this.wcsResult.sipMode === "interp";
+         if (alwaysZero) {
+            node.setText(6, "-");
+         } else {
+            node.setText(6, this.wcsResult.residuals[i].residual_arcsec.toFixed(2) + "\"");
+         }
       } else {
          node.setText(6, "");
       }
@@ -1875,6 +1940,12 @@ ManualSolverDialog.prototype.refreshAll = function () {
    // Button state
    this.applyButton.enabled = (this.wcsResult !== null && this.wcsResult.success);
 
+   // Clear candidate markers if WCS is invalidated
+   if (!this.wcsResult || !this.wcsResult.success) {
+      this.candidateStars = [];
+      this.preview.candidateMarkers = null;
+   }
+
    // Update catalog panel paired status
    this.updateCatalogPairedStatus();
 };
@@ -1905,6 +1976,7 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
             seq: i + 1,
             label: s.name || s.bayer,
             ra: s.ra, dec: s.dec, mag: s.mag,
+            category: s.con || "",
             searchKey: (s.name + " " + s.bayer).toLowerCase()
          });
       }
@@ -1918,6 +1990,7 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
             seq: i + 1,
             label: label,
             ra: m.ra, dec: m.dec, mag: m.mag,
+            category: m.con || "",
             searchKey: (m.id + " " + m.name).toLowerCase()
          });
       }
@@ -1967,6 +2040,7 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
             seq: i + 1,
             label: lbl,
             ra: s.ra, dec: s.dec, mag: s.mag,
+            category: conAbbr,
             searchKey: (s.name + " " + s.bayer + " HIP " + s.hip).toLowerCase()
          });
       }
@@ -2005,9 +2079,55 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
       var decMM = Math.floor((decAbs - decDD) * 60);
       node.setText(3, decSign + (decDD < 10 ? "0" : "") + decDD + ":" + (decMM < 10 ? "0" : "") + decMM);
       node.setText(4, it.mag.toFixed(1));
+      node.setText(5, it.category || "");
    }
 
    this.updateCatalogPairedStatus();
+   this.updateCatalogCandidateHighlight();
+};
+
+//----------------------------------------------------------------------------
+// Catalog panel: highlight candidate stars (nearest to clicked position)
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.updateCatalogCandidateHighlight = function () {
+   if (!this.candidateRanking || this.candidateRanking.length === 0) return;
+
+   // Build lookup: label -> rank (0=nearest)
+   var rankMap = {};
+   for (var i = 0; i < this.candidateRanking.length; i++) {
+      rankMap[this.candidateRanking[i].label.toLowerCase()] = i;
+   }
+
+   for (var i = 0; i < this.catalogTreeBox.numberOfChildren; i++) {
+      var node = this.catalogTreeBox.child(i);
+      var nodeLabel = node.text(1).toLowerCase();
+      var rank = -1;
+
+      // Check direct match or prefix match
+      if (rankMap.hasOwnProperty(nodeLabel)) {
+         rank = rankMap[nodeLabel];
+      } else {
+         for (var rl in rankMap) {
+            if (rankMap.hasOwnProperty(rl)) {
+               if (nodeLabel.indexOf(rl + " ") === 0 || rl.indexOf(nodeLabel) === 0) {
+                  rank = rankMap[rl];
+                  break;
+               }
+            }
+         }
+      }
+
+      if (rank === 0) {
+         for (var c = 0; c < 6; c++) {
+            node.setBackgroundColor(c, 0x40FF8C00);
+         }
+      } else if (rank > 0 && rank < 5) {
+         for (var c = 0; c < 6; c++) {
+            node.setBackgroundColor(c, 0x20FF8C00);
+         }
+      }
+   }
 };
 
 //----------------------------------------------------------------------------
@@ -2038,9 +2158,141 @@ ManualSolverDialog.prototype.updateCatalogPairedStatus = function () {
             }
          }
       }
-      if (isPaired) {
-         for (var c = 0; c < 5; c++) {
-            node.setTextColor(c, 0xff888888);
+      for (var c = 0; c < 6; c++) {
+         node.setTextColor(c, isPaired ? 0xff888888 : 0xff000000);
+      }
+   }
+};
+
+//----------------------------------------------------------------------------
+// Candidate star suggestion: compute and display candidate markers
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.updateCandidateStars = function () {
+   this.candidateStars = [];
+   this.preview.candidateMarkers = null;
+
+   if (!this.suggestCheckBox.checked || !this.wcsResult || !this.wcsResult.success) {
+      this.preview.viewport.update();
+      return;
+   }
+
+   var magLimit = this.magLimitSpinBox.value / 10.0;
+   var imageWidth = this.image.width;
+   var imageHeight = this.image.height;
+
+   // Build set of paired object names (lowercase) to exclude
+   var pairedNames = {};
+   for (var i = 0; i < this.starPairs.length; i++) {
+      if (this.starPairs[i].name) {
+         pairedNames[this.starPairs[i].name.toLowerCase()] = true;
+      }
+   }
+
+   var candidates = [];
+
+   // Scan CATALOG_STARS
+   for (var i = 0; i < CATALOG_STARS.length; i++) {
+      var s = CATALOG_STARS[i];
+      if (s.mag > magLimit) continue;
+      var label = s.name || s.bayer || ("HIP " + s.hip);
+      if (pairedNames[label.toLowerCase()]) continue;
+      var pix = skyToPixel(s.ra, s.dec, this.wcsResult, imageHeight);
+      if (!pix) continue;
+      if (pix.px < 0 || pix.px >= imageWidth || pix.py < 0 || pix.py >= imageHeight) continue;
+      candidates.push({ px: pix.px, py: pix.py, ra: s.ra, dec: s.dec, name: label, label: label, mag: s.mag, con: s.con, hip: s.hip, type: "star" });
+   }
+
+   // Scan MESSIER_OBJECTS
+   for (var i = 0; i < MESSIER_OBJECTS.length; i++) {
+      var m = MESSIER_OBJECTS[i];
+      if (m.mag > magLimit) continue;
+      var label = m.id;
+      if (m.name) label += " " + m.name;
+      if (pairedNames[m.id.toLowerCase()] || pairedNames[label.toLowerCase()]) continue;
+      var pix = skyToPixel(m.ra, m.dec, this.wcsResult, imageHeight);
+      if (!pix) continue;
+      if (pix.px < 0 || pix.px >= imageWidth || pix.py < 0 || pix.py >= imageHeight) continue;
+      candidates.push({ px: pix.px, py: pix.py, ra: m.ra, dec: m.dec, name: m.id, label: m.id, mag: m.mag, type: "messier" });
+   }
+
+   // Sort by magnitude (brightest first)
+   candidates.sort(function (a, b) { return a.mag - b.mag; });
+
+   this.candidateStars = candidates;
+   this.preview.candidateMarkers = candidates;
+   this.preview.viewport.update();
+};
+
+//----------------------------------------------------------------------------
+// Highlight nearest candidates in catalog list when image is clicked
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.highlightNearestCandidates = function (px, py) {
+   if (!this.candidateStars || this.candidateStars.length === 0) return;
+
+   // Compute distance to each candidate
+   var ranked = [];
+   for (var i = 0; i < this.candidateStars.length; i++) {
+      var c = this.candidateStars[i];
+      var dx = c.px - px;
+      var dy = c.py - py;
+      ranked.push({ dist: Math.sqrt(dx * dx + dy * dy), candidate: c });
+   }
+   ranked.sort(function (a, b) { return a.dist - b.dist; });
+
+   // Keep top 5
+   this.candidateRanking = [];
+   for (var i = 0; i < Math.min(5, ranked.length); i++) {
+      this.candidateRanking.push({
+         dist: ranked[i].dist,
+         name: ranked[i].candidate.name,
+         label: ranked[i].candidate.label
+      });
+   }
+
+   // Auto-switch category to match the nearest candidate
+   var top = ranked[0].candidate;
+   if (top.type === "messier") {
+      this.catalogCategoryCombo.currentItem = 1;
+   } else if (top.type === "star" && top.con) {
+      // Check if it's a navigation star first
+      var isNavStar = top.hip && NAVIGATION_STAR_HIPS.indexOf(top.hip) >= 0;
+      if (isNavStar) {
+         this.catalogCategoryCombo.currentItem = 0;
+      } else {
+         // Find constellation index: sorted conKeys, offset by 2
+         var conKeys = [];
+         for (var k in CONSTELLATION_LINES) {
+            if (CONSTELLATION_LINES.hasOwnProperty(k)) conKeys.push(k);
+         }
+         conKeys.sort();
+         for (var ci = 0; ci < conKeys.length; ci++) {
+            if (conKeys[ci] === top.con) {
+               this.catalogCategoryCombo.currentItem = ci + 2;
+               break;
+            }
+         }
+      }
+   }
+
+   // Clear search text to avoid filtering out the candidate
+   this.catalogSearchEdit.text = "";
+
+   // Rebuild catalog list to apply highlight colors
+   this.buildCatalogList();
+
+   // Auto-scroll to the nearest candidate in catalog TreeBox
+   if (this.candidateRanking.length > 0) {
+      var topLabel = this.candidateRanking[0].label.toLowerCase();
+      for (var i = 0; i < this.catalogTreeBox.numberOfChildren; i++) {
+         var node = this.catalogTreeBox.child(i);
+         var nodeLabel = node.text(1).toLowerCase();
+         if (nodeLabel === topLabel
+             || nodeLabel.indexOf(topLabel + " ") === 0
+             || topLabel.indexOf(nodeLabel) === 0) {
+            this.catalogTreeBox.currentNode = node;
+            break;
          }
       }
    }
@@ -2074,9 +2326,9 @@ ManualSolverDialog.prototype.rebuildBitmap = function () {
 //----------------------------------------------------------------------------
 
 ManualSolverDialog.prototype.doSolve = function () {
-   if (this.starPairs.length < 4) {
+   if (this.starPairs.length < 3) {
       var mb = new MessageBox(
-         "At least 4 star pairs required (current: " + this.starPairs.length + ").",
+         "At least 3 star pairs required (current: " + this.starPairs.length + ").",
          TITLE, StdIcon_Warning, StdButton_Ok);
       mb.execute();
       return;
@@ -2104,6 +2356,7 @@ ManualSolverDialog.prototype.doSolve = function () {
    console.writeln("  Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px");
    console.writeln("  Stars: " + this.starPairs.length);
 
+   this.updateCandidateStars();
    this.refreshAll();
 };
 
@@ -2172,7 +2425,7 @@ ManualSolverDialog.prototype.doApply = function () {
 #define SETTINGS_KEY "ManualImageSolver/sessionData"
 
 // Save session data to Settings
-function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, rotationAngle, gridMode) {
+function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, rotationAngle, gridMode, suggestEnabled, magLimit) {
    var data = {
       imageId: imageId,
       imageWidth: imageWidth,
@@ -2180,6 +2433,8 @@ function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, r
       stretchMode: stretchMode,
       rotationAngle: rotationAngle || 0,
       gridMode: gridMode || "smooth",
+      suggestEnabled: suggestEnabled !== false,
+      magLimit: typeof magLimit === "number" ? magLimit : 30,
       starPairs: []
    };
    for (var i = 0; i < starPairs.length; i++) {
@@ -2225,7 +2480,9 @@ ManualSolverDialog.prototype.saveSessionData = function () {
          this.stretchMode,
          this.starPairs,
          this.preview.rotationAngle,
-         gridModes[this.gridModeComboBox.currentItem] || "smooth"
+         gridModes[this.gridModeComboBox.currentItem] || "smooth",
+         this.suggestCheckBox.checked,
+         this.magLimitSpinBox.value
       );
       console.writeln("Session data saved (" + this.starPairs.length + " stars).");
    }
@@ -2394,6 +2651,8 @@ function main() {
    var restoredStretchMode = null;
    var restoredRotationAngle = 0;
    var restoredGridMode = "smooth";
+   var restoredSuggestEnabled = true;
+   var restoredMagLimit = 30;
    var sessionData = loadSession();
    if (sessionData
        && sessionData.imageWidth === image.width
@@ -2408,6 +2667,8 @@ function main() {
          restoredStretchMode = sessionData.stretchMode || "linked";
          restoredRotationAngle = sessionData.rotationAngle || 0;
          restoredGridMode = sessionData.gridMode || (sessionData.smoothGrid === false ? "off" : "smooth");
+         restoredSuggestEnabled = sessionData.hasOwnProperty("suggestEnabled") ? sessionData.suggestEnabled !== false : true;
+         restoredMagLimit = sessionData.hasOwnProperty("magLimit") && typeof sessionData.magLimit === "number" ? sessionData.magLimit : 30;
          console.writeln("Restoring session (" + restoredStarPairs.length + " stars).");
       }
    }
@@ -2427,6 +2688,8 @@ function main() {
       if (restoredRotationAngle && restoredRotationAngle !== 0) {
          dlg.preview.setRotation(restoredRotationAngle);
       }
+      dlg.suggestCheckBox.checked = restoredSuggestEnabled;
+      dlg.magLimitSpinBox.value = restoredMagLimit;
       dlg.refreshAll();
    }
 
