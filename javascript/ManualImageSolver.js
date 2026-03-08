@@ -2189,7 +2189,7 @@ ManualSolverDialog.prototype.updateCandidateStars = function () {
       var pix = skyToPixel(s.ra, s.dec, this.wcsResult, imageHeight);
       if (!pix) continue;
       if (pix.px < 0 || pix.px >= imageWidth || pix.py < 0 || pix.py >= imageHeight) continue;
-      candidates.push({ px: pix.px, py: pix.py, ra: s.ra, dec: s.dec, name: label, label: label, mag: s.mag });
+      candidates.push({ px: pix.px, py: pix.py, ra: s.ra, dec: s.dec, name: label, label: label, mag: s.mag, con: s.con, hip: s.hip, type: "star" });
    }
 
    // Scan MESSIER_OBJECTS
@@ -2202,7 +2202,7 @@ ManualSolverDialog.prototype.updateCandidateStars = function () {
       var pix = skyToPixel(m.ra, m.dec, this.wcsResult, imageHeight);
       if (!pix) continue;
       if (pix.px < 0 || pix.px >= imageWidth || pix.py < 0 || pix.py >= imageHeight) continue;
-      candidates.push({ px: pix.px, py: pix.py, ra: m.ra, dec: m.dec, name: m.id, label: m.id, mag: m.mag });
+      candidates.push({ px: pix.px, py: pix.py, ra: m.ra, dec: m.dec, name: m.id, label: m.id, mag: m.mag, type: "messier" });
    }
 
    // Sort by magnitude (brightest first)
@@ -2226,12 +2226,47 @@ ManualSolverDialog.prototype.highlightNearestCandidates = function (px, py) {
       var c = this.candidateStars[i];
       var dx = c.px - px;
       var dy = c.py - py;
-      ranked.push({ dist: Math.sqrt(dx * dx + dy * dy), name: c.name, label: c.label });
+      ranked.push({ dist: Math.sqrt(dx * dx + dy * dy), candidate: c });
    }
    ranked.sort(function (a, b) { return a.dist - b.dist; });
 
    // Keep top 5
-   this.candidateRanking = ranked.slice(0, 5);
+   this.candidateRanking = [];
+   for (var i = 0; i < Math.min(5, ranked.length); i++) {
+      this.candidateRanking.push({
+         dist: ranked[i].dist,
+         name: ranked[i].candidate.name,
+         label: ranked[i].candidate.label
+      });
+   }
+
+   // Auto-switch category to match the nearest candidate
+   var top = ranked[0].candidate;
+   if (top.type === "messier") {
+      this.catalogCategoryCombo.currentItem = 1;
+   } else if (top.type === "star" && top.con) {
+      // Check if it's a navigation star first
+      var isNavStar = top.hip && NAVIGATION_STAR_HIPS.indexOf(top.hip) >= 0;
+      if (isNavStar) {
+         this.catalogCategoryCombo.currentItem = 0;
+      } else {
+         // Find constellation index: sorted conKeys, offset by 2
+         var conKeys = [];
+         for (var k in CONSTELLATION_LINES) {
+            if (CONSTELLATION_LINES.hasOwnProperty(k)) conKeys.push(k);
+         }
+         conKeys.sort();
+         for (var ci = 0; ci < conKeys.length; ci++) {
+            if (conKeys[ci] === top.con) {
+               this.catalogCategoryCombo.currentItem = ci + 2;
+               break;
+            }
+         }
+      }
+   }
+
+   // Clear search text to avoid filtering out the candidate
+   this.catalogSearchEdit.text = "";
 
    // Rebuild catalog list to apply highlight colors
    this.buildCatalogList();
@@ -2241,9 +2276,10 @@ ManualSolverDialog.prototype.highlightNearestCandidates = function (px, py) {
       var topLabel = this.candidateRanking[0].label.toLowerCase();
       for (var i = 0; i < this.catalogTreeBox.numberOfChildren; i++) {
          var node = this.catalogTreeBox.child(i);
-         if (node.text(1).toLowerCase() === topLabel
-             || node.text(1).toLowerCase().indexOf(topLabel + " ") === 0
-             || topLabel.indexOf(node.text(1).toLowerCase()) === 0) {
+         var nodeLabel = node.text(1).toLowerCase();
+         if (nodeLabel === topLabel
+             || nodeLabel.indexOf(topLabel + " ") === 0
+             || topLabel.indexOf(nodeLabel) === 0) {
             this.catalogTreeBox.currentNode = node;
             break;
          }
