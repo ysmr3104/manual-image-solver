@@ -195,6 +195,46 @@ test("WCSFitter: 不正な DEC でエラー", function () {
    assertFalse(result.success, "不正 DEC で失敗");
 });
 
+test("WCSFitter: 既知WCSからの合成3星（最小構成）で残差 < 1 arcsec", function () {
+   var knownCrval = [180.0, 45.0];
+   var knownCd = [
+      [-4.166667e-4, 0.0],
+      [0.0, 4.166667e-4]
+   ];
+   var imgW = 6000, imgH = 4000;
+   var crpix1 = imgW / 2.0 + 0.5;
+   var crpix2 = imgH / 2.0 + 0.5;
+
+   // 3星: 左上、右上、中央下（三角形配置で十分な分離）
+   var testPixels = [
+      { px: 500, py: 500 },
+      { px: 5500, py: 500 },
+      { px: 3000, py: 3500 },
+   ];
+
+   var starPairs = [];
+   for (var i = 0; i < testPixels.length; i++) {
+      var u = (testPixels[i].px + 1.0) - crpix1;
+      var v = (imgH - testPixels[i].py) - crpix2;
+      var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
+      var eta = knownCd[1][0] * u + knownCd[1][1] * v;
+      var coord = tanDeproject(knownCrval, [xi, eta]);
+      starPairs.push({
+         px: testPixels[i].px,
+         py: testPixels[i].py,
+         ra: coord[0],
+         dec: coord[1],
+         name: "TestStar" + (i + 1)
+      });
+   }
+
+   var fitter = new WCSFitter(starPairs, imgW, imgH);
+   var result = fitter.solve();
+
+   assertTrue(result.success, "3星でフィット成功");
+   assertTrue(result.rms_arcsec < 1.0, "RMS < 1 arcsec (実際: " + result.rms_arcsec + ")");
+});
+
 test("WCSFitter: 既知WCSからの合成4星（最小構成）で残差 < 1 arcsec", function () {
    // 既知の WCS パラメータ（典型的な星野写真）
    // CRVAL = (180.0, 45.0), ピクセルスケール ≈ 1.5 arcsec/px
