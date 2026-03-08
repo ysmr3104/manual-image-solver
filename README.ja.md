@@ -1,6 +1,6 @@
 [English](README.md)
 
-# Manual Image Solver v1.3.0
+# Manual Image Solver v1.3.1
 
 手動プレートソルブツール。画像上の星をユーザーが手動で同定し、TAN（gnomonic）投影の WCS（World Coordinate System）を算出して画像に適用します。
 

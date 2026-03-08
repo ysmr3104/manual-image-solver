@@ -12,7 +12,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VERSION="1.3.0"
+VERSION="1.3.1"
 PACKAGE_NAME="ManualImageSolver"
 ZIP_NAME="${PACKAGE_NAME}-${VERSION}.zip"
 REPO_DIR="${SCRIPT_DIR}/repository"
