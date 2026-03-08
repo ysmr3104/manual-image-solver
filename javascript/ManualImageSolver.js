@@ -1462,16 +1462,18 @@ function ManualSolverDialog(targetWindow) {
    this.catalogTreeBox.alternateRowColor = true;
    this.catalogTreeBox.headerVisible = true;
    this.catalogTreeBox.headerSorting = true;
-   this.catalogTreeBox.numberOfColumns = 5;
+   this.catalogTreeBox.numberOfColumns = 6;
    this.catalogTreeBox.setHeaderText(0, "#");
    this.catalogTreeBox.setHeaderText(1, "Name");
    this.catalogTreeBox.setHeaderText(2, "RA");
    this.catalogTreeBox.setHeaderText(3, "DEC");
    this.catalogTreeBox.setHeaderText(4, "Mag");
+   this.catalogTreeBox.setHeaderText(5, "Category");
    this.catalogTreeBox.setColumnWidth(0, 55);
    this.catalogTreeBox.setColumnWidth(1, 100);
    this.catalogTreeBox.setColumnWidth(2, 48);
    this.catalogTreeBox.setColumnWidth(3, 52);
+   this.catalogTreeBox.setColumnWidth(4, 48);
    this.catalogTreeBox.sort(0, true); // # ascending by default
 
    // Double-click catalog entry -> pair with pending click
@@ -1967,6 +1969,7 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
             seq: i + 1,
             label: s.name || s.bayer,
             ra: s.ra, dec: s.dec, mag: s.mag,
+            category: s.con || "",
             searchKey: (s.name + " " + s.bayer).toLowerCase()
          });
       }
@@ -1980,6 +1983,7 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
             seq: i + 1,
             label: label,
             ra: m.ra, dec: m.dec, mag: m.mag,
+            category: m.con || "",
             searchKey: (m.id + " " + m.name).toLowerCase()
          });
       }
@@ -2029,6 +2033,7 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
             seq: i + 1,
             label: lbl,
             ra: s.ra, dec: s.dec, mag: s.mag,
+            category: conAbbr,
             searchKey: (s.name + " " + s.bayer + " HIP " + s.hip).toLowerCase()
          });
       }
@@ -2067,6 +2072,7 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
       var decMM = Math.floor((decAbs - decDD) * 60);
       node.setText(3, decSign + (decDD < 10 ? "0" : "") + decDD + ":" + (decMM < 10 ? "0" : "") + decMM);
       node.setText(4, it.mag.toFixed(1));
+      node.setText(5, it.category || "");
    }
 
    this.updateCatalogPairedStatus();
@@ -2106,11 +2112,11 @@ ManualSolverDialog.prototype.updateCatalogCandidateHighlight = function () {
       }
 
       if (rank === 0) {
-         for (var c = 0; c < 5; c++) {
+         for (var c = 0; c < 6; c++) {
             node.setBackgroundColor(c, 0x40FF8C00);
          }
       } else if (rank > 0 && rank < 5) {
-         for (var c = 0; c < 5; c++) {
+         for (var c = 0; c < 6; c++) {
             node.setBackgroundColor(c, 0x20FF8C00);
          }
       }
@@ -2146,7 +2152,7 @@ ManualSolverDialog.prototype.updateCatalogPairedStatus = function () {
          }
       }
       if (isPaired) {
-         for (var c = 0; c < 5; c++) {
+         for (var c = 0; c < 6; c++) {
             node.setTextColor(c, 0xff888888);
          }
       }
