@@ -73,8 +73,7 @@ node tests/javascript/test_parse_coords.js
 - **CRVAL の 3D ベクトル平均**: 天球上の 3D 単位ベクトル（cos(DEC)cos(RA), cos(DEC)sin(RA), sin(DEC)）の平均から CRVAL を決定。従来の「RA の 2D ベクトル平均 + DEC 算術平均」では天の極を含む画像（RA が 360° に渡る）で CRVAL が大幅にずれていた。
 - **オートストレッチ**: median + MAD ベースの STF パラメータ → MTF（中間調転送関数）で Bitmap 生成。大画像は MAX_BITMAP_EDGE (2048px) に縮小。
 - **座標パース**: `parseRAInput()` は HMS (スペース/コロン区切り) と度数の両方を受け付け。`parseDECInput()` は ±DMS と度数の両方。
-- **SIP 歪み補正**: 近似モード（approx）と補間モード（interp）の2モード。近似モードは 6星以上で SIP order 2、10星以上で order 3。補間モードは TAN-only RMS がピクセルスケールの5倍以上のとき自動選択、項数≥星数の高次 SIP で全制御点を正確に通る最小ノルム解を使用。CD 行列と SIP 係数の反復精密化（最大10回）で収束。逆 SIP (AP, BP) も計算し PixInsight の `regenerateAstrometricSolution()` 対応。
-- **制御点直接設定（interp モード）**: 補間モードでは高次 SIP 多項式が星間で暴走し、`regenerateAstrometricSolution()` が生成する制御点が汚染されるため、Apply 時に制御点を直接上書き。CD 行列の線形マッピングによるグリッド制御点 + 星の正確な TAN 投影による星制御点を RBF スプライン（ThinPlateSpline）の制御点として書き込む。**重要**: `ControlPoints:Weights` は PixInsight の SplineWorldTransformation に存在しない非標準プロパティであり、書き込むとバリデーションエラーになる。スプライン設定プロパティ（RBFType, SplineOrder 等）6つ + 制御点プロパティ2つの計8プロパティを全て書き込む必要がある。
+- **歪み補正（TPS 直接フィッティング）**: SIP 多項式を廃止し、TPS（Thin Plate Spline）制御点を直接生成。4星以上で歪みベクトル（TAN 投影 − CD 線形予測）を計算し、`hasDistortion` フラグを設定。Apply 時に CD 行列の線形マッピングによるグリッド制御点 + 星の正確な TAN 投影による星制御点を RBF スプライン（ThinPlateSpline）の制御点として書き込む。Grid モード（Off/Smooth/Linear）で制御点の補間方式を切替可能。**重要**: `ControlPoints:Weights` は PixInsight の SplineWorldTransformation に存在しない非標準プロパティであり、書き込むとバリデーションエラーになる。スプライン設定プロパティ（RBFType, SplineOrder 等）6つ + 制御点プロパティ2つの計8プロパティを全て書き込む必要がある。
 
 ## テスト方針
 
