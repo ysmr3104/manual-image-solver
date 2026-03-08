@@ -1899,9 +1899,16 @@ ManualSolverDialog.prototype.refreshAll = function () {
       node.setText(4, raToHMS(s.ra));
       node.setText(5, decToDMS(s.dec));
 
-      // Residual
+      // Residual: show "-" when residual is always zero by definition
+      // (exact fit with 3 stars, or SIP interp mode)
       if (this.wcsResult && this.wcsResult.residuals && this.wcsResult.residuals[i]) {
-         node.setText(6, this.wcsResult.residuals[i].residual_arcsec.toFixed(2) + "\"");
+         var alwaysZero = this.starPairs.length <= 3
+            || this.wcsResult.sipMode === "interp";
+         if (alwaysZero) {
+            node.setText(6, "-");
+         } else {
+            node.setText(6, this.wcsResult.residuals[i].residual_arcsec.toFixed(2) + "\"");
+         }
       } else {
          node.setText(6, "");
       }
