@@ -2158,10 +2158,8 @@ ManualSolverDialog.prototype.updateCatalogPairedStatus = function () {
             }
          }
       }
-      if (isPaired) {
-         for (var c = 0; c < 6; c++) {
-            node.setTextColor(c, 0xff888888);
-         }
+      for (var c = 0; c < 6; c++) {
+         node.setTextColor(c, isPaired ? 0xff888888 : 0xff000000);
       }
    }
 };
