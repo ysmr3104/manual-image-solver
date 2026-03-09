@@ -36,7 +36,7 @@ When automatic plate solving with astrometry.net or PixInsight's ImageSolver fai
 1. In PixInsight, go to **Resources > Updates > Manage Repositories**
 2. Click **Add** and enter the following URL:
    ```
-   https://raw.githubusercontent.com/ysmr3104/manual-image-solver/main/repository/
+   https://ysmrastro.github.io/pixinsight-scripts/
    ```
 3. Click **OK**, then run **Resources > Updates > Check for Updates**
 4. Restart PixInsight
