@@ -9,7 +9,7 @@
 // Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.1.1"
+#define VERSION "1.1.2"
 
 #include <pjsr/StdIcon.jsh>
 #include <pjsr/StdButton.jsh>
@@ -74,6 +74,62 @@ function applyWCS(window, wcsData) {
    }
 
    window.keywords = cleanedKw;
+
+   // Write PCL:AstrometricSolution properties required by SPFC and other tools.
+   var view = window.mainView;
+   var attrs = PropertyAttribute_Storable | PropertyAttribute_Permanent;
+   var image = view.image;
+
+   // Remove any existing SplineWorldTransformation properties from previous solutions.
+   var existingProps = view.properties;
+   for (var pi = 0; pi < existingProps.length; pi++) {
+      if (existingProps[pi].indexOf("SplineWorldTransformation") >= 0) {
+         view.deleteProperty(existingProps[pi]);
+      }
+   }
+   view.deleteProperty("Transformation_ImageToProjection");
+   view.deleteProperty("PCL:AstrometricSolution:Information");
+
+   // Projection system
+   view.setPropertyValue("PCL:AstrometricSolution:ProjectionSystem", "Gnomonic", PropertyType_String8, attrs);
+
+   // Reference celestial coordinates (degrees)
+   var refCelestial = new Vector([wcs.crval1, wcs.crval2]);
+   view.setPropertyValue("PCL:AstrometricSolution:ReferenceCelestialCoordinates", refCelestial, PropertyType_F64Vector, attrs);
+
+   // Reference image coordinates (I-coordinates: 0-based x, bottom-up y)
+   var refImgX = wcs.crpix1 - 1;
+   var refImgY = wcs.crpix2;
+   var refImage = new Vector([refImgX, refImgY]);
+   view.setPropertyValue("PCL:AstrometricSolution:ReferenceImageCoordinates", refImage, PropertyType_F64Vector, attrs);
+
+   // Linear transformation matrix (CD matrix)
+   var ltMatrix = new Matrix(2, 2);
+   ltMatrix.at(0, 0, wcs.cd1_1);
+   ltMatrix.at(0, 1, wcs.cd1_2);
+   ltMatrix.at(1, 0, wcs.cd2_1);
+   ltMatrix.at(1, 1, wcs.cd2_2);
+   view.setPropertyValue("PCL:AstrometricSolution:LinearTransformationMatrix", ltMatrix, PropertyType_F64Matrix, attrs);
+
+   // Native coordinates of the reference point (TAN: 0, 90)
+   var refNative = new Vector([0, 90]);
+   view.setPropertyValue("PCL:AstrometricSolution:ReferenceNativeCoordinates", refNative, PropertyType_F64Vector, attrs);
+
+   // Celestial pole native coordinates
+   var plon = (wcs.crval2 < 90) ? 180 : 0;
+   var celestialPole = new Vector([plon, 90]);
+   view.setPropertyValue("PCL:AstrometricSolution:CelestialPoleNativeCoordinates", celestialPole, PropertyType_F64Vector, attrs);
+
+   // Observation center coordinates (approximate: use CRVAL as center)
+   view.setPropertyValue("Observation:Center:RA", wcs.crval1, PropertyType_Float64, attrs);
+   view.setPropertyValue("Observation:Center:Dec", wcs.crval2, PropertyType_Float64, attrs);
+   view.setPropertyValue("Observation:CelestialReferenceSystem", "ICRS", PropertyType_String8, attrs);
+   view.setPropertyValue("Observation:Equinox", 2000.0, PropertyType_Float64, attrs);
+
+   // Creation metadata
+   view.setPropertyValue("PCL:AstrometricSolution:CreationTime", (new Date).toISOString(), PropertyType_TimePoint, attrs);
+   view.setPropertyValue("PCL:AstrometricSolution:CreatorModule", "WCSApplier " + VERSION, PropertyType_String, attrs);
+
    window.regenerateAstrometricSolution();
 }
 
