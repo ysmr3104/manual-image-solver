@@ -9,7 +9,7 @@
 // Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.1.1"
+#define VERSION "1.1.2"
 
 #include <pjsr/StdIcon.jsh>
 #include <pjsr/StdButton.jsh>
