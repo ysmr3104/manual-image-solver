@@ -214,7 +214,69 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
    cleanedKw.push(makeFITSKeyword("OBJCTDEC", decToDMS(imgCenter[1])));
 
    targetWindow.keywords = cleanedKw;
-   targetWindow.regenerateAstrometricSolution();
+
+   // Write PCL:AstrometricSolution properties required by SPFC and other tools.
+   var view = targetWindow.mainView;
+   var attrs = PropertyAttribute_Storable | PropertyAttribute_Permanent;
+
+   // Remove any existing SplineWorldTransformation properties from previous solutions.
+   var existingProps = view.properties;
+   for (var pi = 0; pi < existingProps.length; pi++) {
+      if (existingProps[pi].indexOf("SplineWorldTransformation") >= 0) {
+         view.deleteProperty(existingProps[pi]);
+      }
+   }
+   view.deleteProperty("Transformation_ImageToProjection");
+   view.deleteProperty("PCL:AstrometricSolution:Information");
+
+   // Projection system
+   view.setPropertyValue("PCL:AstrometricSolution:ProjectionSystem", "Gnomonic", PropertyType_String8, attrs);
+
+   // Reference celestial coordinates (degrees)
+   var refCelestial = new Vector([wcsResult.crval1, wcsResult.crval2]);
+   view.setPropertyValue("PCL:AstrometricSolution:ReferenceCelestialCoordinates", refCelestial, PropertyType_F64Vector, attrs);
+
+   // Reference image coordinates (I-coordinates: 0-based x, bottom-up y)
+   var refImgX = wcsResult.crpix1 - 1;
+   var refImgY = wcsResult.crpix2;
+   var refImage = new Vector([refImgX, refImgY]);
+   view.setPropertyValue("PCL:AstrometricSolution:ReferenceImageCoordinates", refImage, PropertyType_F64Vector, attrs);
+
+   // Linear transformation matrix (CD matrix)
+   var ltMatrix = new Matrix(2, 2);
+   ltMatrix.at(0, 0, wcsResult.cd[0][0]);
+   ltMatrix.at(0, 1, wcsResult.cd[0][1]);
+   ltMatrix.at(1, 0, wcsResult.cd[1][0]);
+   ltMatrix.at(1, 1, wcsResult.cd[1][1]);
+   view.setPropertyValue("PCL:AstrometricSolution:LinearTransformationMatrix", ltMatrix, PropertyType_F64Matrix, attrs);
+
+   // Native coordinates of the reference point (TAN: 0, 90)
+   var refNative = new Vector([0, 90]);
+   view.setPropertyValue("PCL:AstrometricSolution:ReferenceNativeCoordinates", refNative, PropertyType_F64Vector, attrs);
+
+   // Celestial pole native coordinates
+   var plon = (wcsResult.crval2 < 90) ? 180 : 0;
+   var celestialPole = new Vector([plon, 90]);
+   view.setPropertyValue("PCL:AstrometricSolution:CelestialPoleNativeCoordinates", celestialPole, PropertyType_F64Vector, attrs);
+
+   // Observation center coordinates
+   view.setPropertyValue("Observation:Center:RA", imgCenter[0], PropertyType_Float64, attrs);
+   view.setPropertyValue("Observation:Center:Dec", imgCenter[1], PropertyType_Float64, attrs);
+   view.setPropertyValue("Observation:CelestialReferenceSystem", "ICRS", PropertyType_String8, attrs);
+   view.setPropertyValue("Observation:Equinox", 2000.0, PropertyType_Float64, attrs);
+
+   // Creation metadata
+   view.setPropertyValue("PCL:AstrometricSolution:CreationTime", (new Date).toISOString(), PropertyType_TimePoint, attrs);
+   var creatorApp = format("PixInsight %s%d.%d.%d",
+      CoreApplication.versionLE ? "LE " : "",
+      CoreApplication.versionMajor,
+      CoreApplication.versionMinor,
+      CoreApplication.versionRelease);
+   view.setPropertyValue("PCL:AstrometricSolution:CreatorApplication", creatorApp, PropertyType_String, attrs);
+   view.setPropertyValue("PCL:AstrometricSolution:CreatorModule", "ManualImageSolver " + VERSION, PropertyType_String, attrs);
+
+   // NOTE: Do NOT call regenerateAstrometricSolution() here.
+   // The caller (doApply) writes spline control points first, then regenerates.
 }
 
 //----------------------------------------------------------------------------
@@ -2341,6 +2403,9 @@ ManualSolverDialog.prototype.doApply = function () {
    setCustomControlPoints(this.targetWindow, this.wcsResult,
       this.starPairs, this.image.width, this.image.height,
       gridMode);
+
+   // Rebuild internal astrometric solution after all properties are written
+   this.targetWindow.regenerateAstrometricSolution();
 
    // Console output
    var wcsObj = {
