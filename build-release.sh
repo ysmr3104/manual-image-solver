@@ -29,9 +29,11 @@ rm -rf "${TMPDIR_BASE}"
 mkdir -p "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}"
 
 # 3. JavaScript ファイルをコピー
-cp "${SCRIPT_DIR}/javascript/ManualImageSolver.js" "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"
-cp "${SCRIPT_DIR}/javascript/wcs_math.js"           "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"
+cp "${SCRIPT_DIR}/javascript/ManualImageSolver.js"   "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"
+cp "${SCRIPT_DIR}/javascript/ManualImageSolver.xsgn" "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"
+cp "${SCRIPT_DIR}/javascript/wcs_math.js"            "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"
 cp "${SCRIPT_DIR}/javascript/WCSApplier.js"          "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"
+cp "${SCRIPT_DIR}/javascript/WCSApplier.xsgn"        "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"
 cp "${SCRIPT_DIR}/javascript/wcs_keywords.js"        "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"
 cp "${SCRIPT_DIR}/javascript/catalog_data.js"        "${TMPDIR_BASE}/src/scripts/${PACKAGE_NAME}/"
 
