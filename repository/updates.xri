@@ -6,9 +6,9 @@
    </description>
    <platform os="all" arch="noarch" version="1.8.9:9.9.9">
       <package fileName="ManualImageSolver-1.3.3.zip"
-               sha1="43016ed73e768d0e0c0c07bdc444db400d958c7f"
+               sha1="51617608e25defd73d822370548339650c0752fe"
                type="script"
-               releaseDate="20260310">
+               releaseDate="20260313">
          <title>Manual Image Solver</title>
          <description>
             <p>Manual plate solver: interactively identify stars and compute a TAN-projection WCS solution.</p>
