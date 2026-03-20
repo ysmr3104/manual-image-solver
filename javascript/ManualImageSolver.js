@@ -1568,6 +1568,14 @@ function ManualSolverDialog(targetWindow) {
       + "0: 星点を完全補間（過適合リスクあり）。\n"
       + "0.01 〜 0.05: 誤差を吸収してなめらかな変換（推奨）。";
 
+   this.smoothnessResetButton = new ToolButton(this);
+   this.smoothnessResetButton.icon = this.scaledResource(":/process-interface/reset.png");
+   this.smoothnessResetButton.setScaledFixedSize(24, 24);
+   this.smoothnessResetButton.toolTip = "Smoothness をデフォルト値（0.01）に戻す";
+   this.smoothnessResetButton.onClick = function() {
+      self.smoothnessControl.setValue(0.01);
+   };
+
    var mainButtonSizer = new HorizontalSizer;
    mainButtonSizer.add(this.smoothnessControl);
    mainButtonSizer.addStretch();
@@ -1575,6 +1583,8 @@ function ManualSolverDialog(targetWindow) {
    mainButtonSizer.add(this.solveButton);
    mainButtonSizer.add(this.applyButton);
    mainButtonSizer.add(this.closeButton);
+   mainButtonSizer.addSpacing(8);
+   mainButtonSizer.add(this.smoothnessResetButton);
 
    // --- Overall layout ---
    this.sizer = new VerticalSizer;
