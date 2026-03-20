@@ -1574,6 +1574,8 @@ function ManualSolverDialog(targetWindow) {
    this.smoothnessResetButton.toolTip = "Smoothness をデフォルト値（0.01）に戻す";
    this.smoothnessResetButton.onClick = function() {
       self.smoothnessControl.setValue(0.01);
+      self.suggestCheckBox.checked = true;
+      self.magLimitSpinBox.value = 30;
    };
 
    var mainButtonSizer = new HorizontalSizer;
