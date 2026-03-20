@@ -1769,7 +1769,7 @@ ManualSolverDialog.prototype.refreshAll = function () {
       node.setText(5, decToDMS(s.dec));
 
       // Residual: show "-" when residual is always zero by definition
-      // (exact fit with 3 stars, or hasDistortion)
+      // (exact fit with 3 stars)
       if (this.wcsResult && this.wcsResult.residuals && this.wcsResult.residuals[i]) {
          var alwaysZero = this.starPairs.length <= 3;
          if (alwaysZero) {

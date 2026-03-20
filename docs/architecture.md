@@ -6,7 +6,6 @@
 manual-image-solver/
 ├── javascript/
 │   ├── ManualImageSolver.js       # PJSR メイン（ネイティブ Dialog で全操作完結）
-│   ├── WCSApplier.js              # スタンドアロン JSON → WCS 適用
 │   ├── wcs_math.js                # WCS 数学関数（PJSR + Node.js 両対応）
 │   ├── wcs_keywords.js            # FITS WCS キーワードユーティリティ（PJSR 専用）
 │   └── catalog_data.js            # 組み込みカタログデータ（PJSR + Node.js 両対応）

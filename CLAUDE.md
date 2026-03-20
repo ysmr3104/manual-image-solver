@@ -8,7 +8,6 @@ Manual Image Solver は手動プレートソルブツール。Python 不要、Pi
 
 1. **ManualImageSolver.js** (PJSR): メインスクリプト。画像表示、星クリック選択、セントロイド計算、WCS フィッティング、WCS 適用を全て PJSR Dialog 内で実行
 2. **wcs_math.js**: TAN投影、WCSFitter、セントロイド計算の数学ライブラリ（PJSR + Node.js 両対応）
-3. **WCSApplier.js** (PJSR): スタンドアロン JSON → WCS 適用（独立ツールとして維持）
 
 ```
 PixInsight（PJSR ネイティブ、外部プロセス不要）
@@ -40,12 +39,11 @@ node tests/javascript/test_parse_coords.js
 ### PJSR ネイティブ構成（JavaScript のみ）
 
 - **`javascript/wcs_math.js`**: WCS 数学ライブラリ。`#include` で ManualImageSolver.js に取り込み。**PJSR と Node.js の両方**で動作する純粋 JavaScript。`var` 宣言・ES5 スタイルが必須（PJSR は `let`/`const`/アロー関数を未サポート）。コード内の変数名・関数名・コメント・コンソール出力（`console.writeln`）は全て英語で記述する。
-- **`javascript/wcs_keywords.js`**: FITS WCS キーワードユーティリティ（`isWCSKeyword`, `makeFITSKeyword`）。ManualImageSolver.js と WCSApplier.js の両方から `#include` で共有。PJSR 専用。
+- **`javascript/wcs_keywords.js`**: FITS WCS キーワードユーティリティ（`isWCSKeyword`, `makeFITSKeyword`）。ManualImageSolver.js から `#include` で共有。PJSR 専用。
 - **`javascript/ManualImageSolver.js`**: メインスクリプト。全 UI を PJSR Dialog で構築。
   - `ImagePreviewControl` (ScrollBox): スクロール状態を手動管理（scrollX/scrollY）、ズーム/パン/クリック/表示回転
   - `StarEditDialog` (Dialog): 天体名入力 + Sesame 検索 + RA/DEC 入力
   - `ManualSolverDialog` (Dialog): メイン UI（ツールバー + 画像 + 星テーブル + ボタン）
-- **`javascript/WCSApplier.js`**: スタンドアロン JSON → WCS 適用
 
 ### 主要機能
 
@@ -61,7 +59,7 @@ node tests/javascript/test_parse_coords.js
 
 - **TAN（gnomonic）投影**: `tanProject()` / `tanDeproject()` で天球座標 ↔ 標準座標を変換
 - **CD行列フィット**: 2つの独立した2変数線形回帰をクレーメルの公式で直接解く
-- **CRVAL 決定**: 星の天球座標の 3D 単位ベクトル平均を初期値（天の極を含む画像に対応）とし、残差重心で反復更新（5回、更新後に TAN 投影が破綻する場合はスキップ）
+- **CRVAL 決定**: 星の天球座標の 3D 単位ベクトル平均を初期値（天の極を含む画像に対応）とし、残差重心で反復更新（最大15回、収束条件 < 0.0001 arcsec、更新後に TAN 投影が破綻する場合はスキップ）
 - **座標系**: ピクセル座標は 0-based（PixInsight: y=0 が画像上端）、FITS は 1-based（y=1 が画像下端）。フィット時に X は `px + 1`、Y は `height - py` で変換
 - 詳細は `docs/specs.md` 参照
 
@@ -73,7 +71,7 @@ node tests/javascript/test_parse_coords.js
 - **CRVAL の 3D ベクトル平均**: 天球上の 3D 単位ベクトル（cos(DEC)cos(RA), cos(DEC)sin(RA), sin(DEC)）の平均から CRVAL を決定。従来の「RA の 2D ベクトル平均 + DEC 算術平均」では天の極を含む画像（RA が 360° に渡る）で CRVAL が大幅にずれていた。
 - **オートストレッチ**: median + MAD ベースの STF パラメータ → MTF（中間調転送関数）で Bitmap 生成。大画像は MAX_BITMAP_EDGE (2048px) に縮小。
 - **座標パース**: `parseRAInput()` は HMS (スペース/コロン区切り) と度数の両方を受け付け。`parseDECInput()` は ±DMS と度数の両方。
-- **歪み補正（TPS 直接フィッティング）**: SIP 多項式を廃止し、TPS（Thin Plate Spline）制御点を直接生成。4星以上で歪みベクトル（TAN 投影 − CD 線形予測）を計算し、`hasDistortion` フラグを設定。Apply 時に CD 行列の線形マッピングによるグリッド制御点 + 星の正確な TAN 投影による星制御点を RBF スプライン（ThinPlateSpline）の制御点として書き込む。Grid モード（Off/Smooth/Linear）で制御点の補間方式を切替可能。**重要**: `ControlPoints:Weights` は PixInsight の SplineWorldTransformation に存在しない非標準プロパティであり、書き込むとバリデーションエラーになる。スプライン設定プロパティ（RBFType, SplineOrder 等）6つ + 制御点プロパティ2つの計8プロパティを全て書き込む必要がある。
+- **SplineWorldTransformation（星点のみ方式）**: SIP 多項式・歪みベクトルを廃止し、星点のみを TPS（Thin Plate Spline）制御点として書き込む（旧版 Andrés del Pozo 版と同方式）。スプライン設定プロパティ（RBFType, SplineOrder 等）6つ + 制御点プロパティ2つの計8プロパティを全て書き込む必要がある。**重要**: `ControlPoints:Weights` は PixInsight の SplineWorldTransformation に存在しない非標準プロパティであり、書き込むとバリデーションエラーになる。Smoothness は UI の NumericControl（0.0000〜0.0500、デフォルト 0.01）で設定。
 
 ## テスト方針
 

@@ -1,7 +1,7 @@
 //============================================================================
 // wcs_keywords.js - FITS WCS keyword utilities
 //
-// Shared by ManualImageSolver.js and WCSApplier.js via #include.
+// Shared by ManualImageSolver.js via #include.
 // PJSR-only (requires FITSKeyword class).
 //
 // Copyright (c) 2026 Manual Image Solver Project
