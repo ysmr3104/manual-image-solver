@@ -262,7 +262,7 @@ WCSFitter.prototype.solve = function () {
 
    // --- 2-4. Iterate: TAN projection -> CD matrix fit -> CRVAL update ---
    var cd = [[0, 0], [0, 0]];
-   var maxIter = 5;
+   var maxIter = 15;
 
    for (var iter = 0; iter < maxIter; iter++) {
       var crval = [crval1, crval2];
@@ -354,8 +354,14 @@ WCSFitter.prototype.solve = function () {
          }
       }
       if (updateOk) {
+         var crval2Rad = crval2 * Math.PI / 180.0;
+         var crvalDelta = Math.sqrt(
+            Math.pow((newCrval[0] - crval1) * Math.cos(crval2Rad), 2) +
+            Math.pow(newCrval[1] - crval2, 2)
+         ) * 3600.0;  // degrees -> arcsec
          crval1 = newCrval[0];
          crval2 = newCrval[1];
+         if (crvalDelta < 1e-4) break;  // < 0.0001 arcsec で収束
       }
    }
 
@@ -363,14 +369,10 @@ WCSFitter.prototype.solve = function () {
    var crval = [crval1, crval2];
    var residuals = [];
    var totalResidSq = 0;
-   var uObs = [];
-   var vObs = [];
 
    for (var i = 0; i < nStars; i++) {
       var u = (stars[i].px + 1.0) - crpix1;
       var v = (this.height - stars[i].py) - crpix2;
-      uObs.push(u);
-      vObs.push(v);
 
       var predXi  = cd[0][0] * u + cd[0][1] * v;
       var predEta = cd[1][0] * u + cd[1][1] * v;
@@ -385,41 +387,9 @@ WCSFitter.prototype.solve = function () {
    }
 
    var rmsArcsec = Math.sqrt(totalResidSq / nStars);
-   var tanRmsArcsec = rmsArcsec;
 
    // Pixel scale computation (from CD matrix singular values)
    var pixelScaleArcsec = Math.sqrt(Math.abs(cd[0][0] * cd[1][1] - cd[0][1] * cd[1][0])) * 3600.0;
-
-   // --- 6. Compute distortion vectors (gnomonic residuals per star) ---
-   // Distortion vector = exact TAN projection - CD linear prediction
-   // These are used by ManualImageSolver to generate TPS control points directly
-   var distortionVectors = [];
-   var hasDistortion = false;
-
-   if (nStars >= 4) {
-      for (var i = 0; i < nStars; i++) {
-         var proj = tanProject(crval, [stars[i].ra, stars[i].dec]);
-         if (proj) {
-            var predXi2  = cd[0][0] * uObs[i] + cd[0][1] * vObs[i];
-            var predEta2 = cd[1][0] * uObs[i] + cd[1][1] * vObs[i];
-            distortionVectors.push({
-               u: uObs[i],
-               v: vObs[i],
-               dxi: proj[0] - predXi2,
-               deta: proj[1] - predEta2
-            });
-         }
-      }
-      // Check if any distortion is significant (> 0.01 arcsec)
-      for (var i = 0; i < distortionVectors.length; i++) {
-         var dMag = Math.sqrt(distortionVectors[i].dxi * distortionVectors[i].dxi +
-                              distortionVectors[i].deta * distortionVectors[i].deta) * 3600.0;
-         if (dMag > 0.01) {
-            hasDistortion = true;
-            break;
-         }
-      }
-   }
 
    return {
       success: true,
@@ -428,11 +398,8 @@ WCSFitter.prototype.solve = function () {
       crpix1: crpix1,
       crpix2: crpix2,
       cd: cd,
-      distortionVectors: distortionVectors,
-      hasDistortion: hasDistortion,
       pixelScale_arcsec: pixelScaleArcsec,
       rms_arcsec: rmsArcsec,
-      rms_arcsec_tan: tanRmsArcsec,
       residuals: residuals,
       message: "WCS fit succeeded (RMS: " + rmsArcsec.toFixed(2) + " arcsec, "
          + "pixel scale: " + pixelScaleArcsec.toFixed(3) + " arcsec/px)"
