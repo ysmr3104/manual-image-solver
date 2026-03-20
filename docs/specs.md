@@ -6,7 +6,7 @@
 2. [処理フロー概要](#2-処理フロー概要)
 3. [WCS フィッティングの数学](#3-wcs-フィッティングの数学)
 4. [セントロイド計算](#4-セントロイド計算)
-5. [歪み補正（TPS 直接フィッティング）](#5-歪み補正tps-直接フィッティング)
+5. [SplineWorldTransformation 制御点生成](#5-splineworldtransformation-制御点生成)
 6. [WCS 適用](#6-wcs-適用)
 7. [制御点生成と AnnotateImage 連携](#7-制御点生成と-annotateimage-連携)
 8. [天体名検索（CDS Sesame）](#8-天体名検索cds-sesame)
@@ -43,30 +43,26 @@ Manual Image Solver は、PixInsight の PJSR（PixInsight JavaScript Runtime）
    ├─ 画像上の星をクリック → セントロイド計算でサブピクセル精度の位置を取得
    └─ 天球座標をペアリング（カタログ選択 or Sesame 検索 or 手入力）
 
-2. TAN-only フィット（§3 詳細）
+2. TAN フィット（§3 詳細）
    ├─ CRVAL 初期値: 星の 3D 単位ベクトル平均
    ├─ CD 行列: 線形最小二乗フィット
-   └─ CRVAL 反復更新（5 回）で収束
+   └─ CRVAL 反復更新（最大 15 回、収束条件 < 0.0001 arcsec）
 
-3. 歪みベクトルの計算（§5 詳細）
-   ├─ 星数 < 4 → 歪みなし（TAN-only で完了）
-   └─ 星数 ≥ 4 → 各星の歪みベクトル（TAN 投影 − CD 線形予測）を計算
-
-4. WCS 適用（§6 詳細）
+3. WCS 適用（§6 詳細）
    ├─ FITS キーワード書き込み（CRVAL, CD, CTYPE 等）
-   ├─ regenerateAstrometricSolution() で AnnotateImage 用スプライン生成
-   └─ TPS 制御点の直接設定（Grid モードに応じた生成方式、§7 詳細）
+   ├─ regenerateAstrometricSolution() でアストロメトリック初期化
+   └─ SplineWT 制御点の直接設定（星点のみ、smoothness 指定可、§7 詳細）
 ```
 
-### 2.3 Grid モードの役割
+### 2.3 Smoothness パラメータの役割
 
-WCS 適用の最終段階で、AnnotateImage が使用する TPS 制御点の生成方式を 3 つのモードから選択できる。CD 行列だけでは表現できない歪み（4 星以上で検出）がある場合、Grid モードで制御点の補間方式を制御する。
+WCS 適用の最終段階で、AnnotateImage が使用する SplineWorldTransformation の平滑化係数を指定できる。
 
-| モード | 概要 |
+| 値 | 挙動 |
 |---|---|
-| **Off** | 星位置は正確な TAN 投影、グリッド線は CD 線形 |
-| **Smooth** (デフォルト) | IDW 補間で星近傍は正確、遠方は CD 線形に漸近 |
-| **Linear** | 全制御点を CD 線形で生成、完全な直線グリッド |
+| `0` | 全星点を完全補間（過適合リスクあり） |
+| `0.01`（デフォルト） | 誤差を適度に吸収してなめらかな変換 |
+| `0.01 〜 0.05` | 誤差が大きい星が多い場合に増やす |
 
 詳細は §7 を参照。
 
@@ -124,7 +120,7 @@ CD2_1, CD2_2 も同様に η を使用して解く。
 1. **初期値**: 入力星の天球座標の 3D 単位ベクトル平均（天の極を含む画像にも正しく対応）
 2. TAN投影で標準座標を計算 → CD 行列をフィット
 3. フィット残差の重心を逆投影して CRVAL を更新（更新後に全星の TAN 投影が失敗する場合はスキップ）
-4. 5回反復で収束
+4. **最大 15 回反復**し、CRVAL 更新量が 0.0001 arcsec 未満になった時点で収束と判定して終了
 
 3D 単位ベクトル平均:
 ```
@@ -214,48 +210,45 @@ Haversine 公式より数値的に安定。
 - ノイズの多い画像: セントロイドが不安定になる
 - 失敗時はクリック座標をそのまま使用
 
-## 5. 歪み補正（TPS 直接フィッティング）
+## 5. SplineWorldTransformation 制御点生成
 
 ### 5.1 概要
 
-広角画像（FOV > 数度）では CD 行列の線形モデルだけでは TAN 投影の非線形性を吸収できない。v1.4.0 以降、SIP 多項式に代わり **TPS（Thin Plate Spline）制御点の直接生成** で歪み補正を行う。SIP 多項式で発生していた Runge 現象（星間での多項式暴走）を根本的に排除し、AnnotateImage のグリッド表示品質を向上させる。
+v1.4.0 以降、**星点のみ**を制御点として使用する方式（旧版 ManualImageSolver、Andrés del Pozo 版と同方式）を採用。旧版の「グリッド点（CD 線形）＋ 星点（TAN 投影）」方式は、グリッド点と星点の値に矛盾が生じた場合にスプラインが局所的に振動し、AnnotateImage の星座線がずれる原因となっていた。
 
-### 5.2 歪みベクトル
+星点のみ方式では制御点間の矛盾がなく、SplineSmoothness を適切に設定することで測定誤差を吸収しながらなめらかなスプラインが得られる。
 
-WCSFitter の `solve()` は、TAN-only フィット（§3）の後に各星の **歪みベクトル** を計算する。歪みベクトルは、正確な TAN 投影と CD 行列の線形予測の差分:
+### 5.2 制御点の計算
+
+各星ペアについて、正確な TAN 投影で gnomonic 座標を算出する:
 
 ```
-proj = tanProject(CRVAL, [RA_i, DEC_i])   → (ξ_exact, η_exact)
-pred_ξ = CD1_1 × u_i + CD1_2 × v_i
-pred_η = CD2_1 × u_i + CD2_2 × v_i
-dξ_i = ξ_exact − pred_ξ
-dη_i = η_exact − pred_η
+proj = tanProject(CRVAL, [RA_i, DEC_i])  → (ξ_i, η_i)
+制御点: { px_i, py_i } → { ξ_i, η_i }
 ```
 
-- 4 星以上の場合に計算（3 星では CD 行列が完全にフィットするため歪みなし）
-- いずれかの歪みベクトルの大きさが 0.01 arcsec を超える場合に `hasDistortion = true`
-- `solve()` の戻り値に `distortionVectors` 配列と `hasDistortion` フラグを含む
+制御点の座標系:
+- Image 座標: PixInsight 0-based ピクセル座標 (px, py)
+- World 座標: TAN 投影の gnomonic 座標 (ξ, η)（度）
 
-### 5.3 TPS 制御点の生成
+WCSFitter で計算する u/v（FITS 座標系オフセット）は SplineWT 制御点には**使用しない**。制御点には生の PixInsight ピクセル座標と直接 TAN 投影した gnomonic 座標を使用するため、PixInsight の内部座標系と完全に整合する。
 
-歪みベクトルは `setCustomControlPoints()` で TPS 制御点に変換される。Grid モード（§7）に応じて、星の正確な TAN 投影座標とグリッド点の CD 線形予測座標を組み合わせた制御点を生成し、PixInsight の SplineWorldTransformation プロパティに直接書き込む。
+### 5.3 FITS キーワード
 
-### 5.4 FITS キーワード
+常に `RA---TAN` / `DEC--TAN` を使用（SIP キーワードは書き込まない）。TAN 投影からのずれはすべて SplineWT 制御点で表現される。
 
-常に `RA---TAN` / `DEC--TAN` を使用（SIP キーワードは書き込まない）。歪み情報は TPS 制御点として画像プロパティに格納される。
-
-### 5.5 精度の目安
+### 5.4 精度の目安
 
 | 状況 | 予想精度 |
 |---|---|
-| 狭角（< 5°）, TAN のみ | < 1 arcsec |
-| 中角（5°〜30°）, TAN + TPS | 1〜10 arcsec（制御点間は IDW で補間） |
-| 広角（> 30°）, TAN + TPS | 星位置は正確、星間は Grid モードに依存 |
+| 狭角（< 5°） | < 1 arcsec |
+| 中角（5°〜30°） | 数 arcsec（smoothness と星数に依存） |
+| 広角（> 30°） | 星位置は正確、smoothness でスプライン品質を調整 |
 
-### 5.6 表示
+### 5.5 ステータス表示
 
-- ステータスバー: `(TPS)` と表示（`hasDistortion` が true の場合）
-- コンソール: `Distortion: TPS (N vectors)` と表示
+- ステータスバー: 常に `(SplineWT)` と表示
+- コンソール: `SplineWT control points: N stars (smoothness=X.XXXX)` と表示
 
 ## 6. WCS 適用
 
@@ -283,60 +276,28 @@ dη_i = η_exact − pred_η
 
 1. 既存の WCS 関連キーワードを全て除去（`isWCSKeyword()` で判定）
 2. 新しい WCS キーワードを追加（`makeFITSKeyword()` で型を自動判定）
-3. `window.regenerateAstrometricSolution()` でアストロメトリック表示を再生成
-4. 制御点の直接設定（Grid モードに応じた生成方式、§7 参照）
+3. `window.regenerateAstrometricSolution()` でアストロメトリック表示を初期化
+4. SplineWT 制御点の直接設定（星点のみ方式、§7 参照）
 
 ## 7. 制御点生成と AnnotateImage 連携
 
 ### 7.1 背景と目的
 
-PixInsight の AnnotateImage プロセスは、WCS の FITS キーワード（CD 行列）を直接使用せず、画像プロパティに格納された **制御点** と **RBF スプライン** で sky→pixel 変換を行う。`regenerateAstrometricSolution()` がこの制御点を生成するが、歪みがある場合は制御点を直接上書きして正確な TPS 補間を実現する。
+PixInsight の AnnotateImage プロセスは、WCS の FITS キーワード（CD 行列）を直接使用せず、画像プロパティに格納された **制御点** と **RBF スプライン** で sky→pixel 変換を行う。`regenerateAstrometricSolution()` がこの制御点を生成するが、正確な非線形変換を保証するために制御点を直接上書きする。
 
-この問題に対処するため、`regenerateAstrometricSolution()` 後に制御点を直接上書きする。制御点の生成方式を **Grid モード** として 3 種類提供し、用途に応じた表示品質のバランスを選択できる。
+v1.4.0 では旧版（Andrés del Pozo 版）と同様に**星点のみ**を制御点として使用する。旧実装で採用していた「グリッド点 + 星点」の混在方式は、CD 線形グリッド点と TAN 投影星点の間の矛盾がスプラインの局所振動を引き起こし、AnnotateImage 星座線のずれの原因となっていた。
 
-### 7.2 Grid モードの比較
+### 7.2 Smoothness パラメータ
 
-UI のメインダイアログ下部にある ComboBox で切替（デフォルト: Smooth）。
+UI のメインダイアログ下部にある NumericControl（0.0000 〜 0.0500）で設定。デフォルト 0.01。
 
-| モード | グリッド制御点 | 星制御点 | 特徴 |
-|---|---|---|---|
-| **Off** | CD 線形（星近傍 100px を除外） | 正確な TAN 投影（RA/Dec → gnomonic） | 星位置は正確だが、グリッド線が星近傍で歪む場合がある |
-| **Smooth** (デフォルト) | IDW 補正付き CD 線形 | IDW 補正付き CD 線形 | 星近傍で正確、遠方では CD 線形に漸近。バランスの良い表示 |
-| **Linear** | CD 線形（5×5 格子） | CD 線形 | 完全な直線グリッド。レンズ歪み分だけ星位置がずれる |
+| 値 | SplineSmoothness の挙動 | 推奨場面 |
+|---|---|---|
+| `0` | 全星点を完全補間（過適合リスクあり） | 星数が少なく精度が高い場合 |
+| `0.01`（デフォルト） | 誤差を適度に吸収 | 通常使用 |
+| `0.01 〜 0.05` | より積極的に平滑化 | 誤差の大きい星が混在する場合 |
 
-### 7.3 Off モード
-
-グリッド点は 21×31 格子（最大 651 点）で生成。星位置から半径 100px 以内のグリッド点を除外し、CD 線形値と星の正確な TAN 投影値の矛盾を回避する。星制御点には正確な gnomonic 投影座標を使用するため、星の注釈位置は正確だが、除外領域の境界でグリッド線に不連続が生じる場合がある。
-
-### 7.4 Smooth モード（IDW 補間）
-
-CD 行列による線形近似をベースラインとし、各星の残差を IDW（Inverse Distance Weighting）で周囲に配分する。星に近い点ほど正確な TAN 投影に近づき、離れた点ほど CD 線形に漸近するため、滑らかな遷移が実現する。
-
-各グリッド点 (u, v) の gnomonic 座標を以下の手順で計算:
-
-1. CD 行列で線形近似した天球座標を 3D 単位ベクトルに変換（ベースライン）
-2. 各星の 3D 残差ベクトル（正確な位置 − CD 線形位置）をガウス重みで加重平均:
-   ```
-   w_i = exp(−((u − u_i)² + (v − v_i)²) / (2σ²))
-   correction = Σ(w_i × residual_i) / Σ(w_i)
-   ```
-3. ベースライン + correction を正規化して天球座標に逆変換
-4. TAN 投影で gnomonic 座標を取得
-
-σ² は星間の平均最近傍距離の二乗。星が 3 個未満の場合は IDW を無効化し CD 線形にフォールバック。
-
-### 7.5 Linear モード
-
-全制御点を CD 行列の線形マッピングのみで生成。高次の歪み補正を一切含まないため、グリッド線は完全な直線になる。レンズ歪みがある画像では星の注釈位置がわずかにずれるが、見た目の整ったグリッド表示が得られる。
-
-### 7.6 適用条件
-
-- 全モードで制御点の直接書き込みを実行
-- `hasDistortion` が true の場合、Grid モード設定（Off / Smooth / Linear）に従って制御点を生成
-- 歪みなし（3星以下、または線形データ）の場合は常に Off 相当（CD 線形グリッド + 正確な TAN 投影星）で制御点を生成
-- Grid モード設定はセッション保存・復元の対象
-
-### 7.7 書き込み先プロパティ
+### 7.3 書き込み先プロパティ
 
 スプライン設定プロパティ（`regenerateAstrometricSolution()` が生成した値を完全に上書き）:
 
@@ -344,8 +305,8 @@ CD 行列による線形近似をベースラインとし、各星の残差を I
 |---|---|---|
 | `...:SplineWorldTransformation:RBFType` | String8 | `ThinPlateSpline` |
 | `...:SplineWorldTransformation:SplineOrder` | Int32 | `2` |
-| `...:SplineWorldTransformation:SplineSmoothness` | Float32 | `0`（厳密補間） |
-| `...:SplineWorldTransformation:MaxSplinePoints` | Int32 | 制御点の総数 |
+| `...:SplineWorldTransformation:SplineSmoothness` | Float32 | smoothness（UI 設定値） |
+| `...:SplineWorldTransformation:MaxSplinePoints` | Int32 | 星点の数 |
 | `...:SplineWorldTransformation:UseSimplifiers` | Boolean | `false` |
 | `...:SplineWorldTransformation:SimplifierRejectFraction` | Float32 | `0.10` |
 
@@ -357,6 +318,12 @@ CD 行列による線形近似をベースラインとし、各星の残差を I
 | `...:SplineWorldTransformation:ControlPoints:World` | F64Vector | gnomonic 投影座標 (ξ, η) in degrees × N 点（インターリーブ） |
 
 **注意**: `ControlPoints:Weights` は PixInsight の SplineWorldTransformation の公式プロパティに存在しない。書き込むとバリデーションエラー（`invalid or corrupted control point structures`）が発生する。
+
+### 7.4 適用条件
+
+- 登録星数にかかわらず常に制御点の直接書き込みを実行
+- TAN 投影に失敗した星（反対半球等）は制御点から除外
+- Smoothness 設定はセッション保存・復元の対象
 
 ## 8. 天体名検索（CDS Sesame）
 
@@ -384,7 +351,7 @@ CD 行列による線形近似をベースラインとし、各星の残差を I
 │ • Cyan marker = pending        │ └─────────────────────────────────┘│
 │                                │                        [Manual...] │
 ├────────────────────────────────┴─────────────────────────────────────┤
-│ Reference Stars (minimum 4):                                        │
+│ Reference Stars (minimum 3):                                        │
 │ ┌──────────────────────────────────────────────────────────────────┐ │
 │ │ # │ X       │ Y       │ Name    │ RA          │ DEC         │Res│ │
 │ │01 │ 512.34  │ 1024.12 │ Rigel   │ 05 14 32.27 │ -08 12 05.9 │.23│ │
@@ -392,7 +359,7 @@ CD 行列による線形近似をベースラインとし、各星の残差を I
 │ └──────────────────────────────────────────────────────────────────┘ │
 │ [Edit...] [Remove] [Clear All]  [Export...] [Import...]              │
 │ Star clicked (512.3, 1024.1). Select from catalog or [Manual].      │
-│ Grid:[▼ Smooth]                       [Solve] [Apply] [Close]       │
+│ Smoothness: [====|0.0100]             [Solve] [Apply] [Close]       │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -424,6 +391,7 @@ CD 行列による線形近似をベースラインとし、各星の残差を I
 - 操作: クリックで星選択（セントロイドスナップ）、ドラッグでパン（移動量 4px 以上でパンと判定、未満は星選択）
 - STF: None（リニア）/ Linked（全チャネル共通ストレッチ）/ Unlinked（チャネル独立ストレッチ）の 3 モード切替
 - 星テーブル: RA と DEC を独立した列で表示。ヘッダクリックでソート可能（ゼロパディング番号でソート順が正確）。ソート後も正しい星が選択・編集・削除されるよう、行番号ベースでインデックスを解決
+- ステータスバー: Solve 後は `N stars | RMS X.XX" (SplineWT) | Scale X.XX"/px` を表示
 
 ### 9.4 カタログブラウザパネル
 
@@ -508,7 +476,7 @@ lines: [[26727,26311,25930], [29426,28614,27989,...], ...]
 
 ### 11.2 ワークフロー
 
-1. ユーザーが 4 星以上を登録して **Solve** を実行
+1. ユーザーが 3 星以上を登録して **Solve** を実行
 2. Solve 成功後、`skyToPixel()` で全カタログ星（CATALOG_STARS + MESSIER_OBJECTS）の画像上の位置を計算
 3. 等級制限（Mag limit）以下かつ画像範囲内の未ペアリング星を候補として抽出
 4. 画像上にオレンジ色の十字マーカー + 名前ラベルを描画
@@ -557,4 +525,4 @@ skyToPixel(ra, dec, wcsResult, imageHeight)
 
 ### 11.7 セッション保存
 
-`suggestEnabled`（bool）と `magLimit`（int, ×10）をセッションデータに含めて保存・復元。
+`suggestEnabled`（bool）、`magLimit`（int, ×10）、`smoothness`（float）をセッションデータに含めて保存・復元。後方互換性として旧セッションデータ（`gridMode` フィールドを含む v1.3.x 以前）は自然に無視され、smoothness はデフォルト値（0.01）が使用される。

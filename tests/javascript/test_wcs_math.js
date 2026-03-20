@@ -545,10 +545,10 @@ test("solveLinearSystem: 元の行列が変更されないこと", function () {
 });
 
 //============================================================================
-// distortionVectors / hasDistortion テスト
+// distortionVectors / hasDistortion 削除確認テスト
 //============================================================================
 
-test("WCSFitter: 4星以上で distortionVectors が返される", function () {
+test("WCSFitter: 戻り値に distortionVectors / hasDistortion が存在しない", function () {
    var stars = [
       { px: 100, py: 100, ra: 180.1, dec: 45.1, name: "S1" },
       { px: 900, py: 100, ra: 179.9, dec: 45.1, name: "S2" },
@@ -559,30 +559,12 @@ test("WCSFitter: 4星以上で distortionVectors が返される", function () {
    var fitter = new WCSFitter(stars, 1000, 800);
    var result = fitter.solve();
    assertTrue(result.success, "フィット成功");
-   assertTrue(result.distortionVectors.length === 5, "distortionVectors の数 = 星数");
-   for (var i = 0; i < result.distortionVectors.length; i++) {
-      var dv = result.distortionVectors[i];
-      assertTrue(typeof dv.u === "number", "u が数値");
-      assertTrue(typeof dv.v === "number", "v が数値");
-      assertTrue(typeof dv.dxi === "number", "dxi が数値");
-      assertTrue(typeof dv.deta === "number", "deta が数値");
-   }
+   assertTrue(typeof result.distortionVectors === "undefined", "distortionVectors 削除済み");
+   assertTrue(typeof result.hasDistortion === "undefined", "hasDistortion 削除済み");
 });
 
-test("WCSFitter: 3星では distortionVectors が空", function () {
-   var stars = [
-      { px: 100, py: 100, ra: 180.1, dec: 45.1, name: "S1" },
-      { px: 900, py: 100, ra: 179.9, dec: 45.1, name: "S2" },
-      { px: 500, py: 700, ra: 180.0, dec: 44.9, name: "S3" }
-   ];
-   var fitter = new WCSFitter(stars, 1000, 800);
-   var result = fitter.solve();
-   assertTrue(result.success, "フィット成功");
-   assertTrue(result.distortionVectors.length === 0, "3星では distortionVectors 空");
-   assertFalse(result.hasDistortion, "3星では hasDistortion = false");
-});
-
-test("WCSFitter: 歪みなし線形データで hasDistortion = false", function () {
+test("WCSFitter: CRVAL 収束 (maxIter=15) — RMS < 1 arcsec", function () {
+   // 広視野データ（約 1.0deg 視野）: CRVAL 収束テスト
    var knownCrval = [200.0, -30.0];
    var knownCd = [
       [-2.778e-4, 0.0],
@@ -601,8 +583,7 @@ test("WCSFitter: 歪みなし線形データで hasDistortion = false", function
       { px: 3800, py: 2000 },
       { px: 200, py: 3800 },
       { px: 2000, py: 3800 },
-      { px: 3800, py: 3800 },
-      { px: 1000, py: 1000 }
+      { px: 3800, py: 3800 }
    ];
 
    var starPairs = [];
@@ -620,74 +601,8 @@ test("WCSFitter: 歪みなし線形データで hasDistortion = false", function
 
    var fitter = new WCSFitter(starPairs, imgW, imgH);
    var result = fitter.solve();
-
    assertTrue(result.success, "フィット成功");
-   assertTrue(result.distortionVectors.length === 10, "distortionVectors の数 = 10");
-   for (var i = 0; i < result.distortionVectors.length; i++) {
-      var dv = result.distortionVectors[i];
-      var mag = Math.sqrt(dv.dxi * dv.dxi + dv.deta * dv.deta) * 3600;
-      assertTrue(mag < 0.01, "Star" + (i+1) + " 歪みベクトルがほぼゼロ (実際: " + mag.toFixed(6) + "\")");
-   }
-   assertFalse(result.hasDistortion, "線形データでは hasDistortion = false");
-});
-
-test("WCSFitter: 非線形データで hasDistortion = true", function () {
-   var knownCrval = [200.0, -30.0];
-   var knownCd = [
-      [-2.778e-4, 0.0],
-      [0.0, 2.778e-4]
-   ];
-   var imgW = 4000, imgH = 4000;
-   var crpix1 = imgW / 2.0 + 0.5;
-   var crpix2 = imgH / 2.0 + 0.5;
-
-   var testPixels = [
-      { px: 200, py: 200 },
-      { px: 2000, py: 200 },
-      { px: 3800, py: 200 },
-      { px: 200, py: 2000 },
-      { px: 2000, py: 2000 },
-      { px: 3800, py: 2000 },
-      { px: 200, py: 3800 },
-      { px: 2000, py: 3800 },
-      { px: 3800, py: 3800 },
-      { px: 1000, py: 1000 }
-   ];
-
-   // 線形CDで合成した座標に非線形オフセットを加える
-   var starPairs = [];
-   for (var i = 0; i < testPixels.length; i++) {
-      var u = (testPixels[i].px + 1.0) - crpix1;
-      var v = (imgH - testPixels[i].py) - crpix2;
-      var xi = knownCd[0][0] * u + knownCd[0][1] * v;
-      var eta = knownCd[1][0] * u + knownCd[1][1] * v;
-      // 画像中心からの距離に応じた非線形歪みを付加（放射歪み模擬）
-      var r2 = u * u + v * v;
-      var distortionScale = 1e-10;
-      xi += distortionScale * r2 * u * knownCd[0][0];
-      eta += distortionScale * r2 * v * knownCd[1][1];
-      var coord = tanDeproject(knownCrval, [xi, eta]);
-      starPairs.push({
-         px: testPixels[i].px, py: testPixels[i].py,
-         ra: coord[0], dec: coord[1], name: "Star" + (i + 1)
-      });
-   }
-
-   var fitter = new WCSFitter(starPairs, imgW, imgH);
-   var result = fitter.solve();
-
-   assertTrue(result.success, "フィット成功");
-   assertTrue(result.distortionVectors.length === 10, "distortionVectors の数 = 10");
-   assertTrue(result.hasDistortion, "非線形データでは hasDistortion = true");
-
-   // 少なくとも1つの歪みベクトルが閾値 0.01 arcsec を超えること
-   var maxMag = 0;
-   for (var i = 0; i < result.distortionVectors.length; i++) {
-      var dv = result.distortionVectors[i];
-      var mag = Math.sqrt(dv.dxi * dv.dxi + dv.deta * dv.deta) * 3600;
-      if (mag > maxMag) maxMag = mag;
-   }
-   assertTrue(maxMag > 0.01, "最大歪みが閾値超過 (実際: " + maxMag.toFixed(4) + " arcsec)");
+   assertTrue(result.rms_arcsec < 1.0, "RMS < 1 arcsec (実際: " + result.rms_arcsec.toFixed(4) + " arcsec)");
 });
 
 test("WCSFitter: sip/sipMode プロパティが返されない", function () {
