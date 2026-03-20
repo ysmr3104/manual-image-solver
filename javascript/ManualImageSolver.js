@@ -1560,7 +1560,7 @@ function ManualSolverDialog(targetWindow) {
    this.smoothnessControl.label.text = "Smoothness:";
    this.smoothnessControl.label.minWidth = 80;
    this.smoothnessControl.setRange(0.0, 0.05);
-   this.smoothnessControl.slider.setRange(0, 50);
+   this.smoothnessControl.slider.setRange(0, 500);
    this.smoothnessControl.setPrecision(4);
    this.smoothnessControl.setValue(0.01);
    this.smoothnessControl.toolTip =
