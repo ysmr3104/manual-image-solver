@@ -2234,10 +2234,16 @@ ManualSolverDialog.prototype.doApply = function () {
    applyWCSToImage(this.targetWindow, this.wcsResult, this.image.width, this.image.height);
 
    // 制御点を直接書き込み（regenerateAstrometricSolution の Y 軸解釈に依存しない）
-   var smoothness = this.smoothnessControl.value;
-   setCustomControlPoints(this.targetWindow, this.wcsResult,
-      this.starPairs, this.image.width, this.image.height,
-      smoothness);
+   // SplineWorldTransformation は最低5点必要。4点以下の場合は線形 WCS（CD 行列）のみ適用。
+   var MIN_SPLINE_POINTS = 5;
+   if (this.starPairs.length >= MIN_SPLINE_POINTS) {
+      var smoothness = this.smoothnessControl.value;
+      setCustomControlPoints(this.targetWindow, this.wcsResult,
+         this.starPairs, this.image.width, this.image.height,
+         smoothness);
+   } else {
+      console.warningln("  SplineWT skipped: " + this.starPairs.length + " stars < " + MIN_SPLINE_POINTS + " required. Linear WCS (CD matrix) only.");
+   }
 
    // Rebuild internal astrometric solution after all properties are written
    this.targetWindow.regenerateAstrometricSolution();
