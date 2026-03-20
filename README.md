@@ -22,7 +22,9 @@ When automatic plate solving with astrometry.net or PixInsight's ImageSolver fai
 - **19-level zoom**: Mouse wheel (centered on cursor), Fit / 1:1 buttons, +/- buttons
 - **Display rotation**: Rotate the preview by 90°/180°/270° CW/CCW for portrait images (coordinates are handled correctly)
 - **Sortable star table**: RA and DEC in separate columns, click headers to sort — makes it easy to spot misidentified stars
-- **Circumpolar support**: 3D unit vector mean for CRVAL estimation correctly handles images including the celestial pole
+- **Circumpolar support**: 3D unit vector mean for CRVAL estimation correctly handles images including the celestial pole (up to 15 iterations with convergence threshold)
+- **Smoothness control**: Adjust SplineWorldTransformation smoothness (0–0.05, default 0.01) with a reset button
+- **Improved AnnotateImage accuracy**: Control points use star-only method (same as the original ManualImageSolver by Andrés del Pozo), eliminating constellation line offsets
 - **Session restore**: Star pair data is auto-saved and can be restored on next launch
 - **Export / Import**: Save and load star pair data as JSON files
 - **Sesame search**: Auto-resolve RA/DEC from object names via the CDS Sesame database
@@ -91,7 +93,7 @@ The Category dropdown includes Japanese constellation names for easy identificat
 
 ### 3. Run Solve
 
-Once 4 or more stars are registered, click the **Solve** button. WCS fitting is performed and residuals for each star are displayed.
+Once 3 or more stars are registered, click the **Solve** button. WCS fitting is performed and residuals for each star are displayed (residual values are shown for 4 or more stars).
 
 ![Stars registered](docs/images/05_stars_registered.jpg)
 
@@ -121,6 +123,7 @@ After WCS application, use PixInsight's **AnnotateImage** to overlay constellati
 - **Remove stars**: Select and click **Remove**
 - **Export / Import**: Save and load star pair data as JSON files
 - **Greek letters**: Reference legend is displayed above the star table (α:Alp β:Bet γ:Gam ...)
+- **Smoothness**: NumericControl (0–0.05) at the bottom-right adjusts SplineWT smoothness. The reset button on the far right restores the default (0.01)
 
 ### WCSApplier.js (Manual JSON Application)
 
