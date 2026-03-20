@@ -8,8 +8,6 @@
 
 astrometry.net や PixInsight の ImageSolver による自動プレートソルブが失敗する画像に対し、手動で星を同定して WCS を取得するためのツールです。
 
-**PixInsight 完結**: Python 等の外部依存なし。PixInsight の PJSR ネイティブ Dialog 内で、画像表示から星選択、WCS フィッティング、適用まで全ての操作が完結します。
-
 ![メインダイアログ - 星登録済み](docs/images/05_stars_registered.jpg)
 
 ## 主な機能
