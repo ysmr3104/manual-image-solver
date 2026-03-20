@@ -123,13 +123,6 @@ After WCS application, use PixInsight's **AnnotateImage** to overlay constellati
 - **Greek letters**: Reference legend is displayed above the star table (α:Alp β:Bet γ:Gam ...)
 - **Smoothness**: NumericControl (0–0.05) at the bottom-right adjusts SplineWT smoothness. The reset button on the far right restores the default (0.01)
 
-### WCSApplier.js (Manual JSON Application)
-
-To manually apply WCS from a JSON file:
-1. Open the target image in PixInsight
-2. **Script > Run Script File...** → select `javascript/WCSApplier.js`
-3. Select the JSON file → WCS is applied to the image
-
 ## Technical Details
 
 See [docs/specs.md](docs/specs.md) for the full technical specification.
