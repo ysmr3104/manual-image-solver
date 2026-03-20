@@ -52,6 +52,12 @@ function test(name, fn) {
 
 //============================================================================
 // 座標パース関数（ManualImageSolver.js から抽出）
+//
+// 警告: 以下の関数は ManualImageSolver.js の実装をコピーしたものです。
+// 本体側を修正した場合はこちらも同期してください。
+//   - parseRAInput()    → ManualImageSolver.js 内 parseRAInput
+//   - parseDECInput()   → ManualImageSolver.js 内 parseDECInput
+//   - midtonesTransferFunction() → wcs_math.js 内 midtonesTransferFunction
 //============================================================================
 
 function parseRAInput(text) {

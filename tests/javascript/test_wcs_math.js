@@ -563,7 +563,7 @@ test("WCSFitter: 戻り値に distortionVectors / hasDistortion が存在しな�
    assertTrue(typeof result.hasDistortion === "undefined", "hasDistortion 削除済み");
 });
 
-test("WCSFitter: CRVAL 収束 (maxIter=15) — RMS < 1 arcsec", function () {
+test("WCSFitter: CRVAL 収束 — RMS < 1 arcsec", function () {
    // 広視野データ（約 1.0deg 視野）: CRVAL 収束テスト
    var knownCrval = [200.0, -30.0];
    var knownCd = [
