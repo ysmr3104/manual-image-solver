@@ -39,19 +39,19 @@ Manual Image Solver は、PixInsight の PJSR（PixInsight JavaScript Runtime）
 ### 2.2 処理ステップ
 
 ```
-1. 星の同定（§4, §8, §9, §10）
+1. 星の同定（→ 4. セントロイド計算 / 8. Sesame 検索 / 9. UI 設計 / 10. カタログデータ）
    ├─ 画像上の星をクリック → セントロイド計算でサブピクセル精度の位置を取得
    └─ 天球座標をペアリング（カタログ選択 or Sesame 検索 or 手入力）
 
-2. TAN フィット（§3 詳細）
+2. TAN フィット（→ 3. WCS フィッティングの数学）
    ├─ CRVAL 初期値: 星の 3D 単位ベクトル平均
    ├─ CD 行列: 線形最小二乗フィット
    └─ CRVAL 反復更新（最大 15 回、収束条件 < 0.0001 arcsec）
 
-3. WCS 適用（§6 詳細）
+3. WCS 適用（→ 6. WCS 適用）
    ├─ FITS キーワード書き込み（CRVAL, CD, CTYPE 等）
    ├─ regenerateAstrometricSolution() でアストロメトリック初期化
-   └─ SplineWT 制御点の直接設定（星点のみ、smoothness 指定可、§7 詳細）
+   └─ SplineWT 制御点の直接設定（星点のみ、smoothness 指定可 → 7. 制御点生成）
 ```
 
 ### 2.3 Smoothness パラメータの役割
@@ -64,7 +64,7 @@ WCS 適用の最終段階で、AnnotateImage が使用する SplineWorldTransfor
 | `0.01`（デフォルト） | 誤差を適度に吸収してなめらかな変換 |
 | `0.01 〜 0.05` | 誤差が大きい星が多い場合に増やす |
 
-詳細は §7 を参照。
+詳細は[7. 制御点生成と AnnotateImage 連携](#7-制御点生成と-annotateimage-連携)を参照。
 
 ## 3. WCS フィッティングの数学
 
@@ -91,7 +91,7 @@ RA = CRVAL1 + atan2(ξ*(π/180)*sin(c), ρ*cos(CRVAL2)*cos(c) - η*(π/180)*sin(
 
 ### 3.2 CD 行列の線形最小二乗フィッティング
 
-ピクセルオフセット u_i = (px_i + 1) - CRPIX1, v_i = (height - py_i) - CRPIX2 に対し（座標変換は §3.5 参照）:
+ピクセルオフセット u_i = (px_i + 1) - CRPIX1, v_i = (height - py_i) - CRPIX2 に対し（座標変換は[3.5 座標系の変換](#35-座標系の変換)参照）:
 
 ```
 ξ_i = CD1_1 * u_i + CD1_2 * v_i
@@ -277,7 +277,7 @@ WCSFitter で計算する u/v（FITS 座標系オフセット）は SplineWT 制
 1. 既存の WCS 関連キーワードを全て除去（`isWCSKeyword()` で判定）
 2. 新しい WCS キーワードを追加（`makeFITSKeyword()` で型を自動判定）
 3. `window.regenerateAstrometricSolution()` でアストロメトリック表示を初期化
-4. SplineWT 制御点の直接設定（星点のみ方式、§7 参照）
+4. SplineWT 制御点の直接設定（星点のみ方式、[7. 制御点生成と AnnotateImage 連携](#7-制御点生成と-annotateimage-連携)参照）
 
 ## 7. 制御点生成と AnnotateImage 連携
 
