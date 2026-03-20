@@ -1,6 +1,6 @@
 [日本語](README.ja.md)
 
-# Manual Image Solver v1.3.2
+# Manual Image Solver v1.4.0
 
 A manual plate solving tool for PixInsight. Manually identify stars on an image to compute and apply a TAN (gnomonic) projection WCS (World Coordinate System).
 
