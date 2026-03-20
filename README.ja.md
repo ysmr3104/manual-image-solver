@@ -134,6 +134,10 @@ JSON ファイルから WCS を手動適用する場合:
 
 詳細は [docs/specs.md](docs/specs.md) を参照してください。
 
+## 謝辞
+
+本プロジェクトにおける星点のみを制御点とする手法は、Andrés del Pozo 氏（Copyright 2013–2020）によるオリジナルの ManualImageSolver スクリプトの方式に倣っています。
+
 ## ライセンス
 
 本プロジェクトは [MIT License](LICENSE) のもとで公開されています。

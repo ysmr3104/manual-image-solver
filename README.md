@@ -134,6 +134,10 @@ To manually apply WCS from a JSON file:
 
 See [docs/specs.md](docs/specs.md) for the full technical specification.
 
+## Acknowledgments
+
+The star-only control point method used in this project follows the approach of the original ManualImageSolver script by Andrés del Pozo (Copyright 2013–2020).
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
