@@ -8,6 +8,9 @@ var wcs = require("../../javascript/wcs_math.js");
 
 var tanProject = wcs.tanProject;
 var tanDeproject = wcs.tanDeproject;
+var zenithalProject = wcs.zenithalProject;
+var zenithalDeproject = wcs.zenithalDeproject;
+var PROJECTION_INFO = wcs.PROJECTION_INFO;
 var angularSeparation = wcs.angularSeparation;
 var solveLinearSystem = wcs.solveLinearSystem;
 var solveMinNorm = wcs.solveMinNorm;
@@ -732,6 +735,298 @@ test("skyToPixel: WCSFitterの結果でラウンドトリップ", function () {
       assertEqual(result.px, s.px, "px for " + s.name, 1.0);
       assertEqual(result.py, s.py, "py for " + s.name, 1.0);
    }
+});
+
+//============================================================================
+// PROJECTION_INFO テスト
+//============================================================================
+
+test("PROJECTION_INFO: 全キーの存在と ctype/piName 確認", function () {
+   var types = ["TAN", "ZEA", "ARC", "STG"];
+   for (var i = 0; i < types.length; i++) {
+      var t = types[i];
+      assertTrue(PROJECTION_INFO[t] !== undefined, t + " exists in PROJECTION_INFO");
+      assertTrue(PROJECTION_INFO[t].ctype1.indexOf(t) >= 0, t + " ctype1 contains projection code");
+      assertTrue(PROJECTION_INFO[t].ctype2.indexOf(t) >= 0, t + " ctype2 contains projection code");
+      assertTrue(typeof PROJECTION_INFO[t].piName === "string", t + " piName is a string");
+   }
+   assertEqual(PROJECTION_INFO["TAN"].piName, "Gnomonic", "TAN piName");
+   assertEqual(PROJECTION_INFO["ZEA"].piName, "ZenithalEqualArea", "ZEA piName");
+   assertEqual(PROJECTION_INFO["ARC"].piName, "ZenithalEquidistant", "ARC piName");
+   assertEqual(PROJECTION_INFO["STG"].piName, "Stereographic", "STG piName");
+});
+
+//============================================================================
+// 天頂投影法の順逆変換ラウンドトリップテスト
+//============================================================================
+
+test("zenithalProject/Deproject: 各投影法のラウンドトリップ精度 (< 1e-10°)", function () {
+   var types = ["TAN", "ZEA", "ARC", "STG"];
+   var crval = [83.633, 22.014];
+   var testCoords = [
+      [84.053, 21.142],
+      [82.500, 23.000],
+      [85.000, 20.500],
+      [83.000, 22.500]
+   ];
+
+   for (var t = 0; t < types.length; t++) {
+      for (var i = 0; i < testCoords.length; i++) {
+         var coord = testCoords[i];
+         var proj = zenithalProject(types[t], crval, coord);
+         assertTrue(proj !== null, types[t] + " projection OK for [" + coord + "]");
+         var deproj = zenithalDeproject(types[t], crval, proj);
+         assertEqual(deproj[0], coord[0], types[t] + " RA round-trip [" + coord + "]", 1e-10);
+         assertEqual(deproj[1], coord[1], types[t] + " DEC round-trip [" + coord + "]", 1e-10);
+      }
+   }
+});
+
+test("zenithalProject/Deproject: 投影中心でのラウンドトリップ", function () {
+   var types = ["TAN", "ZEA", "ARC", "STG"];
+   var crval = [180.0, 45.0];
+
+   for (var t = 0; t < types.length; t++) {
+      var proj = zenithalProject(types[t], crval, [180.0, 45.0]);
+      assertEqual(proj[0], 0.0, types[t] + " xi = 0 at center", 1e-12);
+      assertEqual(proj[1], 0.0, types[t] + " eta = 0 at center", 1e-12);
+
+      var deproj = zenithalDeproject(types[t], crval, [0.0, 0.0]);
+      assertEqual(deproj[0], 180.0, types[t] + " RA = 180 at center", 1e-10);
+      assertEqual(deproj[1], 45.0, types[t] + " DEC = 45 at center", 1e-10);
+   }
+});
+
+//============================================================================
+// 広角テスト: CRVAL から 80° 離れた星
+//============================================================================
+
+test("広角テスト: TAN は 80° で null、ZEA/ARC/STG は成功", function () {
+   var crval = [0.0, 90.0]; // 天の北極
+   var coord = [0.0, 5.0];  // 85° 離れた点
+
+   // TAN should still work at 85 degrees (< 90)
+   var tanProj = zenithalProject("TAN", crval, coord);
+   assertTrue(tanProj !== null, "TAN should succeed at 85 degrees");
+
+   // But at > 90 degrees, TAN fails
+   var coordFar = [0.0, -5.0]; // 95° 離れた点
+   var tanProjFar = zenithalProject("TAN", crval, coordFar);
+   assertTrue(tanProjFar === null, "TAN returns null beyond 90 degrees");
+
+   // ZEA, ARC, STG should succeed at 95 degrees
+   var zeaProj = zenithalProject("ZEA", crval, coordFar);
+   assertTrue(zeaProj !== null, "ZEA succeeds beyond 90 degrees");
+   var arcProj = zenithalProject("ARC", crval, coordFar);
+   assertTrue(arcProj !== null, "ARC succeeds beyond 90 degrees");
+   var stgProj = zenithalProject("STG", crval, coordFar);
+   assertTrue(stgProj !== null, "STG succeeds beyond 90 degrees");
+
+   // Round-trip for ZEA/ARC/STG at wide angle
+   var zeaDeproj = zenithalDeproject("ZEA", crval, zeaProj);
+   assertEqual(zeaDeproj[0], coordFar[0], "ZEA RA round-trip wide", 1e-10);
+   assertEqual(zeaDeproj[1], coordFar[1], "ZEA DEC round-trip wide", 1e-10);
+
+   var arcDeproj = zenithalDeproject("ARC", crval, arcProj);
+   assertEqual(arcDeproj[0], coordFar[0], "ARC RA round-trip wide", 1e-10);
+   assertEqual(arcDeproj[1], coordFar[1], "ARC DEC round-trip wide", 1e-10);
+
+   var stgDeproj = zenithalDeproject("STG", crval, stgProj);
+   assertEqual(stgDeproj[0], coordFar[0], "STG RA round-trip wide", 1e-10);
+   assertEqual(stgDeproj[1], coordFar[1], "STG DEC round-trip wide", 1e-10);
+});
+
+//============================================================================
+// TAN との一貫性テスト
+//============================================================================
+
+test("zenithalProject('TAN') === tanProject() (ラッパー一貫性)", function () {
+   var crval = [120.0, -30.0];
+   var coords = [
+      [121.0, -29.5],
+      [119.0, -30.5],
+      [120.5, -28.0]
+   ];
+   for (var i = 0; i < coords.length; i++) {
+      var p1 = tanProject(crval, coords[i]);
+      var p2 = zenithalProject("TAN", crval, coords[i]);
+      assertTrue(p1 !== null && p2 !== null, "Both projections succeed");
+      assertEqual(p1[0], p2[0], "xi matches for coord " + i, 1e-15);
+      assertEqual(p1[1], p2[1], "eta matches for coord " + i, 1e-15);
+
+      var d1 = tanDeproject(crval, p1);
+      var d2 = zenithalDeproject("TAN", crval, p2);
+      assertEqual(d1[0], d2[0], "deproject RA matches for coord " + i, 1e-15);
+      assertEqual(d1[1], d2[1], "deproject DEC matches for coord " + i, 1e-15);
+   }
+});
+
+//============================================================================
+// WCSFitter: 各投影法でのフィットテスト
+//============================================================================
+
+test("WCSFitter: ZEA 投影で合成6星フィット RMS < 0.1 arcsec", function () {
+   var knownCrval = [83.633, 22.014];
+   var knownCd = [
+      [-3.5e-4, 1.0e-5],
+      [1.0e-5, 3.5e-4]
+   ];
+   var imgW = 6024, imgH = 4024;
+   var crpix1 = imgW / 2.0 + 0.5;
+   var crpix2 = imgH / 2.0 + 0.5;
+
+   var testPixels = [
+      { px: 300, py: 300 },
+      { px: 3000, py: 300 },
+      { px: 5700, py: 300 },
+      { px: 300, py: 3700 },
+      { px: 3000, py: 3700 },
+      { px: 5700, py: 3700 },
+   ];
+
+   var starPairs = [];
+   for (var i = 0; i < testPixels.length; i++) {
+      var u = (testPixels[i].px + 1.0) - crpix1;
+      var v = (imgH - testPixels[i].py) - crpix2;
+      var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
+      var eta = knownCd[1][0] * u + knownCd[1][1] * v;
+      var coord = zenithalDeproject("ZEA", knownCrval, [xi, eta]);
+      starPairs.push({
+         px: testPixels[i].px, py: testPixels[i].py,
+         ra: coord[0], dec: coord[1], name: "Star" + (i + 1)
+      });
+   }
+
+   var fitter = new WCSFitter(starPairs, imgW, imgH, "ZEA");
+   var result = fitter.solve();
+
+   assertTrue(result.success, "ZEA fit succeeded");
+   assertTrue(result.rms_arcsec < 0.1, "ZEA RMS < 0.1 arcsec (actual: " + result.rms_arcsec + ")");
+   assertEqual(result.projectionType, "ZEA", "projectionType in result is ZEA");
+});
+
+test("WCSFitter: ARC 投影で合成6星フィット RMS < 0.1 arcsec", function () {
+   var knownCrval = [200.0, -30.0];
+   var knownCd = [
+      [-2.778e-4, 0.0],
+      [0.0, 2.778e-4]
+   ];
+   var imgW = 4000, imgH = 4000;
+   var crpix1 = imgW / 2.0 + 0.5;
+   var crpix2 = imgH / 2.0 + 0.5;
+
+   var testPixels = [
+      { px: 200, py: 200 },
+      { px: 2000, py: 200 },
+      { px: 3800, py: 200 },
+      { px: 200, py: 3800 },
+      { px: 2000, py: 3800 },
+      { px: 3800, py: 3800 },
+   ];
+
+   var starPairs = [];
+   for (var i = 0; i < testPixels.length; i++) {
+      var u = (testPixels[i].px + 1.0) - crpix1;
+      var v = (imgH - testPixels[i].py) - crpix2;
+      var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
+      var eta = knownCd[1][0] * u + knownCd[1][1] * v;
+      var coord = zenithalDeproject("ARC", knownCrval, [xi, eta]);
+      starPairs.push({
+         px: testPixels[i].px, py: testPixels[i].py,
+         ra: coord[0], dec: coord[1], name: "Star" + (i + 1)
+      });
+   }
+
+   var fitter = new WCSFitter(starPairs, imgW, imgH, "ARC");
+   var result = fitter.solve();
+
+   assertTrue(result.success, "ARC fit succeeded");
+   assertTrue(result.rms_arcsec < 0.1, "ARC RMS < 0.1 arcsec (actual: " + result.rms_arcsec + ")");
+   assertEqual(result.projectionType, "ARC", "projectionType in result is ARC");
+});
+
+test("WCSFitter: STG 投影で合成6星フィット RMS < 0.1 arcsec", function () {
+   var knownCrval = [45.0, 60.0];
+   var knownCd = [
+      [-3.0e-4, 0.0],
+      [0.0, 3.0e-4]
+   ];
+   var imgW = 5000, imgH = 3000;
+   var crpix1 = imgW / 2.0 + 0.5;
+   var crpix2 = imgH / 2.0 + 0.5;
+
+   var testPixels = [
+      { px: 500, py: 500 },
+      { px: 2500, py: 500 },
+      { px: 4500, py: 500 },
+      { px: 500, py: 2500 },
+      { px: 2500, py: 2500 },
+      { px: 4500, py: 2500 },
+   ];
+
+   var starPairs = [];
+   for (var i = 0; i < testPixels.length; i++) {
+      var u = (testPixels[i].px + 1.0) - crpix1;
+      var v = (imgH - testPixels[i].py) - crpix2;
+      var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
+      var eta = knownCd[1][0] * u + knownCd[1][1] * v;
+      var coord = zenithalDeproject("STG", knownCrval, [xi, eta]);
+      starPairs.push({
+         px: testPixels[i].px, py: testPixels[i].py,
+         ra: coord[0], dec: coord[1], name: "Star" + (i + 1)
+      });
+   }
+
+   var fitter = new WCSFitter(starPairs, imgW, imgH, "STG");
+   var result = fitter.solve();
+
+   assertTrue(result.success, "STG fit succeeded");
+   assertTrue(result.rms_arcsec < 0.1, "STG RMS < 0.1 arcsec (actual: " + result.rms_arcsec + ")");
+   assertEqual(result.projectionType, "STG", "projectionType in result is STG");
+});
+
+test("WCSFitter: デフォルト projectionType は TAN", function () {
+   var stars = [
+      { px: 100, py: 100, ra: 180.1, dec: 45.1, name: "S1" },
+      { px: 900, py: 100, ra: 179.9, dec: 45.1, name: "S2" },
+      { px: 100, py: 700, ra: 180.1, dec: 44.9, name: "S3" },
+      { px: 900, py: 700, ra: 179.9, dec: 44.9, name: "S4" }
+   ];
+   var fitter = new WCSFitter(stars, 1000, 800);
+   var result = fitter.solve();
+   assertTrue(result.success, "fit succeeded");
+   assertEqual(result.projectionType, "TAN", "default projectionType is TAN");
+});
+
+//============================================================================
+// skyToPixel: 各投影法テスト
+//============================================================================
+
+test("skyToPixel: ZEA 投影でのラウンドトリップ", function () {
+   var knownCrval = [180.0, 45.0];
+   var knownCd = [
+      [2.778e-4, 0],
+      [0, 2.778e-4]
+   ];
+   var imageHeight = 800;
+   var wcsResult = {
+      crval1: knownCrval[0], crval2: knownCrval[1],
+      crpix1: 500.5, crpix2: 400.5,
+      cd: knownCd,
+      projectionType: "ZEA"
+   };
+
+   var px = 300, py = 200;
+   var u = (px + 1.0) - wcsResult.crpix1;
+   var v = (imageHeight - py) - wcsResult.crpix2;
+   var xi  = knownCd[0][0] * u + knownCd[0][1] * v;
+   var eta = knownCd[1][0] * u + knownCd[1][1] * v;
+   var skyCoord = zenithalDeproject("ZEA", knownCrval, [xi, eta]);
+
+   var result = skyToPixel(skyCoord[0], skyCoord[1], wcsResult, imageHeight);
+   assertTrue(result !== null, "skyToPixel ZEA should not return null");
+   assertEqual(result.px, px, "ZEA px round-trip", 1e-6);
+   assertEqual(result.py, py, "ZEA py round-trip", 1e-6);
 });
 
 //============================================================================

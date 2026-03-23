@@ -70,21 +70,22 @@ function decToDMS(decDeg) {
 }
 
 // Convert pixel coordinates to celestial coordinates (using WCS parameters)
-function pixelToRaDec(wcs, px, py, imageHeight) {
+function pixelToRaDec(wcs, px, py, imageHeight, projectionType) {
    var u = (px + 1.0) - wcs.crpix1;
    var v = (imageHeight - py) - wcs.crpix2;
    var xi  = wcs.cd1_1 * u + wcs.cd1_2 * v;
    var eta = wcs.cd2_1 * u + wcs.cd2_2 * v;
-   return tanDeproject([wcs.crval1, wcs.crval2], [xi, eta]);
+   return zenithalDeproject(projectionType || "TAN", [wcs.crval1, wcs.crval2], [xi, eta]);
 }
 
 // Display coordinates of image corners and center to the console
-function displayImageCoordinates(wcs, imageWidth, imageHeight) {
-   var center = pixelToRaDec(wcs, imageWidth / 2.0, imageHeight / 2.0, imageHeight);
-   var tl = pixelToRaDec(wcs, 0, 0, imageHeight);
-   var tr = pixelToRaDec(wcs, imageWidth - 1, 0, imageHeight);
-   var bl = pixelToRaDec(wcs, 0, imageHeight - 1, imageHeight);
-   var br = pixelToRaDec(wcs, imageWidth - 1, imageHeight - 1, imageHeight);
+function displayImageCoordinates(wcs, imageWidth, imageHeight, projectionType) {
+   var pt = projectionType || "TAN";
+   var center = pixelToRaDec(wcs, imageWidth / 2.0, imageHeight / 2.0, imageHeight, pt);
+   var tl = pixelToRaDec(wcs, 0, 0, imageHeight, pt);
+   var tr = pixelToRaDec(wcs, imageWidth - 1, 0, imageHeight, pt);
+   var bl = pixelToRaDec(wcs, 0, imageHeight - 1, imageHeight, pt);
+   var br = pixelToRaDec(wcs, imageWidth - 1, imageHeight - 1, imageHeight, pt);
 
    console.writeln("");
    console.writeln("<b>Image coordinates:</b>");
@@ -178,7 +179,8 @@ function parseDECInput(text) {
 // WCS application function
 //============================================================================
 
-function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
+function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight, projectionType) {
+   var projType = projectionType || "TAN";
    var existingKw = targetWindow.keywords;
    var cleanedKw = [];
    for (var i = 0; i < existingKw.length; i++) {
@@ -186,8 +188,8 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
          cleanedKw.push(existingKw[i]);
    }
 
-   cleanedKw.push(makeFITSKeyword("CTYPE1", "RA---TAN"));
-   cleanedKw.push(makeFITSKeyword("CTYPE2", "DEC--TAN"));
+   cleanedKw.push(makeFITSKeyword("CTYPE1", PROJECTION_INFO[projType].ctype1));
+   cleanedKw.push(makeFITSKeyword("CTYPE2", PROJECTION_INFO[projType].ctype2));
    cleanedKw.push(makeFITSKeyword("CRVAL1", wcsResult.crval1));
    cleanedKw.push(makeFITSKeyword("CRVAL2", wcsResult.crval2));
    cleanedKw.push(makeFITSKeyword("CRPIX1", wcsResult.crpix1));
@@ -209,7 +211,7 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
       cd1_1: wcsResult.cd[0][0], cd1_2: wcsResult.cd[0][1],
       cd2_1: wcsResult.cd[1][0], cd2_2: wcsResult.cd[1][1]
    };
-   var imgCenter = pixelToRaDec(wcsObj, imageWidth / 2.0, imageHeight / 2.0, imageHeight);
+   var imgCenter = pixelToRaDec(wcsObj, imageWidth / 2.0, imageHeight / 2.0, imageHeight, projType);
    cleanedKw.push(makeFITSKeyword("OBJCTRA", raToHMS(imgCenter[0])));
    cleanedKw.push(makeFITSKeyword("OBJCTDEC", decToDMS(imgCenter[1])));
 
@@ -230,7 +232,7 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
    view.deleteProperty("PCL:AstrometricSolution:Information");
 
    // Projection system
-   view.setPropertyValue("PCL:AstrometricSolution:ProjectionSystem", "Gnomonic", PropertyType_String8, attrs);
+   view.setPropertyValue("PCL:AstrometricSolution:ProjectionSystem", PROJECTION_INFO[projType].piName, PropertyType_String8, attrs);
 
    // Reference celestial coordinates (degrees)
    var refCelestial = new Vector([wcsResult.crval1, wcsResult.crval2]);
@@ -292,15 +294,16 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight) {
 // 旧版 ManualImageSolver（Andrés del Pozo版）と同様に星点のみを制御点として使用。
 // smoothness: SplineWorldTransformation の平滑化係数 (0 = 完全補間)
 //----------------------------------------------------------------------------
-function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageHeight, smoothness) {
+function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageHeight, smoothness, projectionType) {
    if (typeof smoothness === "undefined" || smoothness === null) smoothness = 0;
+   var projType = projectionType || "TAN";
 
    var view = window.mainView;
    var crval = [wcsResult.crval1, wcsResult.crval2];
 
    var starPoints = [];
    for (var i = 0; i < starPairs.length; i++) {
-      var proj = tanProject(crval, [starPairs[i].ra, starPairs[i].dec]);
+      var proj = zenithalProject(projType, crval, [starPairs[i].ra, starPairs[i].dec]);
       if (proj) {
          starPoints.push({ px: starPairs[i].px, py: starPairs[i].py,
                            xi: proj[0], eta: proj[1] });
@@ -1578,8 +1581,29 @@ function ManualSolverDialog(targetWindow) {
       self.magLimitSpinBox.value = 30;
    };
 
+   // --- Projection ComboBox ---
+   var projLabel = new Label(this);
+   projLabel.text = "Projection:";
+
+   this.projectionComboBox = new ComboBox(this);
+   this.projectionComboBox.addItem("TAN (Gnomonic)");
+   this.projectionComboBox.addItem("ZEA (Equal-area)");
+   this.projectionComboBox.addItem("ARC (Equidistant)");
+   this.projectionComboBox.addItem("STG (Stereographic)");
+   this.projectionComboBox.currentItem = 0;
+   this.projectionComboBox.toolTip =
+      "Projection type for WCS fitting.\n\n"
+      + "TAN: Standard gnomonic. Best for normal/telephoto lenses (FOV < ~90\u00B0).\n"
+      + "ZEA: Zenithal equal-area. For equisolid fisheye lenses.\n"
+      + "ARC: Zenithal equidistant. For equidistant fisheye lenses.\n"
+      + "STG: Stereographic. For stereographic fisheye lenses.";
+
    var mainButtonSizer = new HorizontalSizer;
    mainButtonSizer.add(this.smoothnessControl);
+   mainButtonSizer.addSpacing(8);
+   mainButtonSizer.add(projLabel);
+   mainButtonSizer.addSpacing(4);
+   mainButtonSizer.add(this.projectionComboBox);
    mainButtonSizer.addStretch();
    mainButtonSizer.spacing = 8;
    mainButtonSizer.add(this.solveButton);
@@ -2188,6 +2212,15 @@ ManualSolverDialog.prototype.rebuildBitmap = function () {
 };
 
 //----------------------------------------------------------------------------
+// Get selected projection type
+//----------------------------------------------------------------------------
+
+ManualSolverDialog.prototype.getProjectionType = function () {
+   var types = ["TAN", "ZEA", "ARC", "STG"];
+   return types[this.projectionComboBox.currentItem] || "TAN";
+};
+
+//----------------------------------------------------------------------------
 // Solve
 //----------------------------------------------------------------------------
 
@@ -2200,7 +2233,7 @@ ManualSolverDialog.prototype.doSolve = function () {
       return;
    }
 
-   var fitter = new WCSFitter(this.starPairs, this.image.width, this.image.height);
+   var fitter = new WCSFitter(this.starPairs, this.image.width, this.image.height, this.getProjectionType());
    this.wcsResult = fitter.solve();
 
    if (!this.wcsResult.success) {
@@ -2231,7 +2264,8 @@ ManualSolverDialog.prototype.doApply = function () {
    console.writeln("");
    console.writeln("<b>Applying WCS to image...</b>");
 
-   applyWCSToImage(this.targetWindow, this.wcsResult, this.image.width, this.image.height);
+   var projType = this.getProjectionType();
+   applyWCSToImage(this.targetWindow, this.wcsResult, this.image.width, this.image.height, projType);
 
    // 制御点を直接書き込み（regenerateAstrometricSolution の Y 軸解釈に依存しない）
    // SplineWorldTransformation は最低5点必要。4点以下の場合は線形 WCS（CD 行列）のみ適用。
@@ -2240,7 +2274,7 @@ ManualSolverDialog.prototype.doApply = function () {
       var smoothness = this.smoothnessControl.value;
       setCustomControlPoints(this.targetWindow, this.wcsResult,
          this.starPairs, this.image.width, this.image.height,
-         smoothness);
+         smoothness, projType);
    } else {
       console.warningln("  SplineWT skipped: " + this.starPairs.length + " stars < " + MIN_SPLINE_POINTS + " required. Linear WCS (CD matrix) only.");
    }
@@ -2257,7 +2291,7 @@ ManualSolverDialog.prototype.doApply = function () {
    };
    console.writeln("  Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px");
    displayStarPairs(this.starPairs, this.wcsResult.residuals);
-   displayImageCoordinates(wcsObj, this.image.width, this.image.height);
+   displayImageCoordinates(wcsObj, this.image.width, this.image.height, projType);
 
    console.writeln("");
    console.writeln("<b>WCS applied successfully.</b>");
@@ -2281,7 +2315,7 @@ ManualSolverDialog.prototype.doApply = function () {
 #define SETTINGS_KEY "ManualImageSolver/sessionData"
 
 // Save session data to Settings
-function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, rotationAngle, smoothness, suggestEnabled, magLimit) {
+function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, rotationAngle, smoothness, suggestEnabled, magLimit, projectionType) {
    var data = {
       imageId: imageId,
       imageWidth: imageWidth,
@@ -2291,6 +2325,7 @@ function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, r
       smoothness: typeof smoothness === "number" ? smoothness : 0.01,
       suggestEnabled: suggestEnabled !== false,
       magLimit: typeof magLimit === "number" ? magLimit : 30,
+      projectionType: projectionType || "TAN",
       starPairs: []
    };
    for (var i = 0; i < starPairs.length; i++) {
@@ -2337,7 +2372,8 @@ ManualSolverDialog.prototype.saveSessionData = function () {
          this.preview.rotationAngle,
          this.smoothnessControl.value,
          this.suggestCheckBox.checked,
-         this.magLimitSpinBox.value
+         this.magLimitSpinBox.value,
+         this.getProjectionType()
       );
       console.writeln("Session data saved (" + this.starPairs.length + " stars).");
    }
@@ -2367,6 +2403,7 @@ ManualSolverDialog.prototype.doExport = function () {
       imageWidth: this.image.width,
       imageHeight: this.image.height,
       stretchMode: this.stretchMode,
+      projectionType: this.getProjectionType(),
       starPairs: []
    };
    for (var i = 0; i < this.starPairs.length; i++) {
@@ -2473,6 +2510,15 @@ ManualSolverDialog.prototype.doImport = function () {
       }
    }
 
+   // Restore projection type
+   if (data.projectionType) {
+      var projTypes = ["TAN", "ZEA", "ARC", "STG"];
+      var projIdx = projTypes.indexOf(data.projectionType);
+      if (projIdx >= 0) {
+         this.projectionComboBox.currentItem = projIdx;
+      }
+   }
+
    this.wcsResult = null;
    this.refreshAll();
 
@@ -2508,6 +2554,7 @@ function main() {
    var restoredSmoothness = 0.01;
    var restoredSuggestEnabled = true;
    var restoredMagLimit = 30;
+   var restoredProjectionType = "TAN";
    var sessionData = loadSession();
    if (sessionData
        && sessionData.imageWidth === image.width
@@ -2524,6 +2571,7 @@ function main() {
          restoredSmoothness = typeof sessionData.smoothness === "number" ? sessionData.smoothness : 0.01;
          restoredSuggestEnabled = sessionData.hasOwnProperty("suggestEnabled") ? sessionData.suggestEnabled !== false : true;
          restoredMagLimit = sessionData.hasOwnProperty("magLimit") && typeof sessionData.magLimit === "number" ? sessionData.magLimit : 30;
+         restoredProjectionType = sessionData.projectionType || "TAN";
          console.writeln("Restoring session (" + restoredStarPairs.length + " stars).");
       }
    }
@@ -2544,6 +2592,11 @@ function main() {
       }
       dlg.suggestCheckBox.checked = restoredSuggestEnabled;
       dlg.magLimitSpinBox.value = restoredMagLimit;
+      var projTypes = ["TAN", "ZEA", "ARC", "STG"];
+      var projIdx = projTypes.indexOf(restoredProjectionType);
+      if (projIdx >= 0) {
+         dlg.projectionComboBox.currentItem = projIdx;
+      }
       dlg.refreshAll();
    }
 
