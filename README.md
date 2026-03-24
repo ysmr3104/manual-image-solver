@@ -2,7 +2,7 @@
 
 # Manual Image Solver v1.4.0
 
-A manual plate solving tool for PixInsight. Manually identify stars on an image to compute and apply a TAN (gnomonic) projection WCS (World Coordinate System).
+A manual plate solving tool for PixInsight. Manually identify stars on an image to compute and apply a WCS (World Coordinate System) using zenithal projections (TAN / ZEA / STG), including fisheye lens support.
 
 ## Overview
 
@@ -21,6 +21,7 @@ When automatic plate solving with astrometry.net or PixInsight's ImageSolver fai
 - **Display rotation**: Rotate the preview by 90°/180°/270° CW/CCW for portrait images (coordinates are handled correctly)
 - **Sortable star table**: RA and DEC in separate columns, click headers to sort — makes it easy to spot misidentified stars
 - **Circumpolar support**: 3D unit vector mean for CRVAL estimation correctly handles images including the celestial pole (up to 15 iterations with convergence threshold)
+- **Fisheye / wide-field lens support**: Choose from TAN (gnomonic), ZEA (zenithal equal-area), or STG (stereographic) projections via the **Projection** ComboBox
 - **Smoothness control**: Adjust SplineWorldTransformation smoothness (0–0.05, default 0.01) with a reset button
 - **Improved AnnotateImage accuracy**: Control points use star-only method (same as the original ManualImageSolver by Andrés del Pozo), eliminating constellation line offsets
 - **Session restore**: Star pair data is auto-saved and can be restored on next launch
@@ -122,6 +123,38 @@ After WCS application, use PixInsight's **AnnotateImage** to overlay constellati
 - **Export / Import**: Save and load star pair data as JSON files
 - **Greek letters**: Reference legend is displayed above the star table (α:Alp β:Bet γ:Gam ...)
 - **Smoothness**: NumericControl (0–0.05) at the bottom-right adjusts SplineWT smoothness. The reset button on the far right restores the default (0.01)
+
+## Projection Types
+
+| Code | Name | PixInsight PCL | Recommended for |
+|---|---|---|---|
+| **TAN** | Gnomonic | ✅ | Normal / telephoto lenses (FOV < ~90°) |
+| **ZEA** | Zenithal Equal-Area | ✅ | Equisolid or equidistant fisheye lenses |
+| **STG** | Stereographic | ✅ | Stereographic fisheye lenses |
+| ~~ARC~~ | ~~Zenithal Equidistant~~ | ❌ Not supported | — |
+
+**Why ARC is not available**: PixInsight's PCL `ProjectionFactory` does not implement the `ZenithalEquidistant` identifier. Selecting ARC would cause `regenerateAstrometricSolution()` to throw a fatal error. The math is implemented in `wcs_math.js`, but the PixInsight native library (compiled C++) cannot be extended from PJSR. Use **ZEA** as the closest alternative for equidistant fisheye lenses.
+
+### ZEA and AnnotateImage
+
+When using ZEA on a full-sky circular fisheye image (captured on a square sensor), **apply a circular mask** to the image before running AnnotateImage:
+
+```
+Problem: The corners of the square frame lie outside the fisheye circle
+         (black area with no sky data). PixInsight's internal ZEA projection
+         throws an exception when asked to transform those corner pixels,
+         causing AnnotateImage to abort with:
+         "AstrometricMetadata::Verify(): Failed to perform ImageToCelestial()
+          coordinate transformation, step 2."
+
+Fix:     Apply a circular mask matching the fisheye circle boundary
+         before running AnnotateImage.
+```
+
+For best annotation accuracy with fisheye images:
+- Register stars spread evenly across the image, including near the horizon (image edges)
+- Aim for 20–30 control points for full-sky coverage
+- Identify the lens projection type (equisolid → ZEA, stereographic → STG) from the lens spec sheet
 
 ## Technical Details
 

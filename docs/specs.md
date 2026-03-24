@@ -13,12 +13,13 @@
 9. [UI 設計](#9-ui-設計)
 10. [組み込みカタログデータ](#10-組み込みカタログデータ)
 11. [候補星サジェスト](#11-候補星サジェスト)
+12. [投影法の選択と PixInsight PCL の制約（魚眼レンズ対応）](#12-投影法の選択と-pixinsight-pcl-の制約魚眼レンズ対応)
 
 ---
 
 ## 1. 概要
 
-Manual Image Solver は、PixInsight の PJSR（PixInsight JavaScript Runtime）で動作する手動プレートソルブスクリプトです。ユーザーが画像上の星を手動で同定し、TAN（gnomonic）投影の WCS（World Coordinate System）を算出して画像に適用します。
+Manual Image Solver は、PixInsight の PJSR（PixInsight JavaScript Runtime）で動作する手動プレートソルブスクリプトです。ユーザーが画像上の星を手動で同定し、天頂投影法（TAN / ZEA / STG）から選択した WCS（World Coordinate System）を算出して画像に適用します。
 
 ### 対象ユースケース
 
@@ -189,6 +190,47 @@ separation = atan2(sqrt(num1² + num2²), den)
 ```
 
 Haversine 公式より数値的に安定。
+
+### 3.8 天頂投影法（Zenithal Projections）
+
+TAN に加え、広角・魚眼レンズ向けに ZEA・STG を統一関数 `zenithalProject` / `zenithalDeproject` で実装。投影中心からの天頂角 θ に対して、投影タイプごとに動径距離 r の計算式が異なる。
+
+#### 順変換（天球座標 → 標準座標）
+
+```
+D     = sin(CRVAL2)·sin(DEC) + cos(CRVAL2)·cos(DEC)·cos(RA − CRVAL1)
+θ     = acos(D)                              ... 投影中心からの天頂角
+φ     = atan2(cos(DEC)·sin(ΔRA),
+              cos(CRVAL2)·sin(DEC) − sin(CRVAL2)·cos(DEC)·cos(ΔRA))  ... 方位角
+
+r(TAN) = tan(θ)          ... D ≤ 0（反対半球）の場合 null を返す
+r(ZEA) = 2·sin(θ/2)
+r(STG) = 2·tan(θ/2)      ... θ ≥ π の場合 null を返す
+
+ξ = (180/π) · r · sin(φ)
+η = (180/π) · r · cos(φ)
+```
+
+#### 逆変換（標準座標 → 天球座標）
+
+```
+ρ = sqrt(ξ² + η²) × (π/180)    ... ラジアン単位の動径距離
+
+c(TAN) = atan(ρ)
+c(ZEA) = 2·asin(ρ/2)           ... ρ ≤ 2 が有効範囲（≈ 114.6°）
+c(STG) = 2·atan(ρ/2)
+
+DEC = asin(cos(c)·sin(CRVAL2) + η·(π/180)·sin(c)·cos(CRVAL2)/ρ)
+RA  = CRVAL1 + atan2(ξ·(π/180)·sin(c), ρ·cos(CRVAL2)·cos(c) − η·(π/180)·sin(CRVAL2)·sin(c))
+```
+
+#### 各投影法の特性
+
+| 投影法 | r の式 | 特性 | 代表的なレンズ |
+|---|---|---|---|
+| TAN（Gnomonic） | tan(θ) | 大円が直線。FOV 90° 未満向き | 望遠・標準レンズ |
+| ZEA（Zenithal Equal-Area） | 2·sin(θ/2) | 面積保存。等面積・等距離型魚眼向き | Sigma 8mm 等 |
+| STG（Stereographic） | 2·tan(θ/2) | 角度保存（等角写像）。ステレオ型魚眼向き | 一部の特殊レンズ |
 
 ## 4. セントロイド計算
 
@@ -527,3 +569,78 @@ skyToPixel(ra, dec, wcsResult, imageHeight)
 ### 11.7 セッション保存
 
 `suggestEnabled`（bool）、`magLimit`（int, ×10）、`smoothness`（float）をセッションデータに含めて保存・復元。後方互換性として旧セッションデータ（`gridMode` フィールドを含む v1.3.x 以前）は自然に無視され、smoothness はデフォルト値（0.01）が使用される。
+
+---
+
+## 12. 投影法の選択と PixInsight PCL の制約（魚眼レンズ対応）
+
+### 12.1 対応投影法一覧
+
+UI の **Projection ComboBox** で以下の3投影法を選択できる。
+
+| コード | 名称 | PixInsight PCL | 備考 |
+|---|---|---|---|
+| **TAN** | Gnomonic（心射方位） | ✅ サポート | 標準・望遠レンズ向け |
+| **ZEA** | Zenithal Equal-Area（等面積） | ✅ サポート | 等面積・等距離型魚眼向け。**AnnotateImage 使用時は要マスク**（後述） |
+| **STG** | Stereographic（ステレオ） | ✅ サポート | ステレオ型魚眼向け |
+| ~~ARC~~ | ~~Zenithal Equidistant（等距離）~~ | ❌ **未サポート** | PixInsight PCL の `ProjectionFactory` に実装が存在しないため除外 |
+
+### 12.2 ARC が除外されている理由
+
+FITS WCS 標準では ARC（`CTYPE = "RA---ARC"`）は有効な投影法であり、本スクリプトの数学ライブラリ（`wcs_math.js`）も正しく実装している。しかし PixInsight PCL の `ProjectionFactory` がサポートする投影識別子は以下の7種のみであり、ARC（`"ZenithalEquidistant"`）は含まれない:
+
+```
+Gnomonic / Stereographic / ZenithalEqualArea /
+PlateCarree / Mercator / HammerAitoff / Orthographic
+```
+
+ARC を選択した状態で Apply to Image を実行すると、内部で `regenerateAstrometricSolution()` が呼ばれた際に以下のエラーが発生する:
+
+```
+Error: ProjectionBase: Invalid/unsupported projection identifier 'ZenithalEquidistant'
+```
+
+このエラーは PixInsight ネイティブライブラリ（C++）内で発生するため、PJSR（JavaScript）側では対処不可能。PCL は コンパイル済みバイナリであり、外部から新しい投影クラスを追加する手段がない。
+
+等距離型（equidistant）の魚眼レンズを使用する場合は **ZEA** で代替する。等距離と等面積の数学的差異は周辺部（θ > 60°）で顕著になるが、十分な数の星を制御点として登録することで SplineWT がその差分を補正できる。
+
+### 12.3 ZEA と AnnotateImage の制約
+
+#### 問題の本質
+
+ZEA の逆変換の有効範囲は **ρ ≤ 2 ラジアン（天頂角 ≤ 180°）** だが、FITS WCS の CD 行列は CRPIX 付近での**線形近似**に過ぎない。全天魚眼のように画像端が天頂から 90° 以上に相当する広角画像では、正方形センサーのコーナーが線形近似で ρ > 2 rad を超える。
+
+```
+画像サイズ 4480×4480、ピクセルスケール 164 arcsec/px の場合:
+
+  画像端（魚眼円の境界）:  距離 2240 px → ρ ≈ 1.78 rad ✅
+  画像コーナー:           距離 3167 px → ρ ≈ 2.52 rad > 2 ❌
+```
+
+コーナーピクセルは**魚眼円の外（黒い領域）**に対応し、実際の天球上の位置が存在しない。PixInsight PCL の ZEA 実装は ρ > 2 で例外をスロー（JavaScript 実装のようにクランプしない）するため、AnnotateImage の `astrometricSolutionSummary()` がコーナー検証で失敗する:
+
+```
+Error: AstrometricMetadata::Verify(): Failed to perform ImageToCelestial()
+       coordinate transformation, step 2.
+```
+
+#### 解決策：魚眼円への円形マスク適用
+
+Apply to Image の**前**または**後**に、魚眼円の境界に合わせた円形マスクを画像に適用することで、コーナーのピクセルが無効領域として扱われ、AnnotateImage の検証が魚眼円内側のみに限定される。
+
+```
+手順:
+1. PixInsight で円形マスクを作成（魚眼円の直径に合わせる）
+2. 対象画像にマスクを適用
+3. AnnotateImage を実行
+```
+
+#### ZEA AnnotateImage の精度について
+
+ZEA + SplineWT による AnnotateImage の精度は以下の要因に依存する:
+
+| 要因 | 影響 | 対策 |
+|---|---|---|
+| 投影法ミスマッチ（ZEA vs 実際のレンズ） | 周辺部に系統的な半径方向の誤差 | レンズ仕様を確認し正しい投影法を選択 |
+| SplineWT 制御点の偏り | 星の少ない領域（地平線付近など）で精度低下 | その領域にも均等に星を登録（目安: 全体で 20〜30 点） |
+| 打点精度 | ランダム誤差（164 arcsec/px の場合、1px ≈ 2.7′） | セントロイド計算を活用し精度の高い打点を心がける |

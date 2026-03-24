@@ -13,10 +13,12 @@
 //----------------------------------------------------------------------------
 // Projection type metadata
 //----------------------------------------------------------------------------
+// Supported projections: TAN, ZEA, STG only.
+// ARC (ZenithalEquidistant) is NOT supported by PixInsight PCL ProjectionFactory
+// and causes "Invalid/unsupported projection identifier" on regenerateAstrometricSolution().
 var PROJECTION_INFO = {
    "TAN": { ctype1: "RA---TAN", ctype2: "DEC--TAN", piName: "Gnomonic" },
    "ZEA": { ctype1: "RA---ZEA", ctype2: "DEC--ZEA", piName: "ZenithalEqualArea" },
-   "ARC": { ctype1: "RA---ARC", ctype2: "DEC--ARC", piName: "ZenithalEquidistant" },
    "STG": { ctype1: "RA---STG", ctype2: "DEC--STG", piName: "Stereographic" }
 };
 

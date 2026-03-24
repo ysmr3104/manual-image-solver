@@ -1567,16 +1567,17 @@ function ManualSolverDialog(targetWindow) {
    this.smoothnessControl.setPrecision(4);
    this.smoothnessControl.setValue(0.01);
    this.smoothnessControl.toolTip =
-      "SplineWorldTransformation の平滑化係数。\n"
-      + "0: 星点を完全補間（過適合リスクあり）。\n"
-      + "0.01 〜 0.05: 誤差を吸収してなめらかな変換（推奨）。";
+      "SplineWorldTransformation smoothness factor.\n"
+      + "0: Exact interpolation through all star points (risk of overfitting).\n"
+      + "0.01 to 0.05: Absorbs errors for a smoother transformation (recommended).";
 
    this.smoothnessResetButton = new ToolButton(this);
    this.smoothnessResetButton.icon = this.scaledResource(":/process-interface/reset.png");
    this.smoothnessResetButton.setScaledFixedSize(24, 24);
-   this.smoothnessResetButton.toolTip = "Smoothness をデフォルト値（0.01）に戻す";
+   this.smoothnessResetButton.toolTip = "Reset Smoothness, Projection, and other options to defaults";
    this.smoothnessResetButton.onClick = function() {
       self.smoothnessControl.setValue(0.01);
+      self.projectionComboBox.currentItem = 0;
       self.suggestCheckBox.checked = true;
       self.magLimitSpinBox.value = 30;
    };
@@ -1588,15 +1589,14 @@ function ManualSolverDialog(targetWindow) {
    this.projectionComboBox = new ComboBox(this);
    this.projectionComboBox.addItem("TAN (Gnomonic)");
    this.projectionComboBox.addItem("ZEA (Equal-area)");
-   this.projectionComboBox.addItem("ARC (Equidistant)");
    this.projectionComboBox.addItem("STG (Stereographic)");
    this.projectionComboBox.currentItem = 0;
    this.projectionComboBox.toolTip =
       "Projection type for WCS fitting.\n\n"
       + "TAN: Standard gnomonic. Best for normal/telephoto lenses (FOV < ~90\u00B0).\n"
-      + "ZEA: Zenithal equal-area. For equisolid fisheye lenses.\n"
-      + "ARC: Zenithal equidistant. For equidistant fisheye lenses.\n"
-      + "STG: Stereographic. For stereographic fisheye lenses.";
+      + "ZEA: Zenithal equal-area. For equisolid/equidistant fisheye lenses.\n"
+      + "STG: Stereographic. For stereographic fisheye lenses.\n\n"
+      + "Note: ARC (equidistant) is not supported by PixInsight PCL and has been removed.";
 
    var mainButtonSizer = new HorizontalSizer;
    mainButtonSizer.add(this.smoothnessControl);
@@ -2216,7 +2216,7 @@ ManualSolverDialog.prototype.rebuildBitmap = function () {
 //----------------------------------------------------------------------------
 
 ManualSolverDialog.prototype.getProjectionType = function () {
-   var types = ["TAN", "ZEA", "ARC", "STG"];
+   var types = ["TAN", "ZEA", "STG"];
    return types[this.projectionComboBox.currentItem] || "TAN";
 };
 
@@ -2261,10 +2261,29 @@ ManualSolverDialog.prototype.doSolve = function () {
 ManualSolverDialog.prototype.doApply = function () {
    if (!this.wcsResult || !this.wcsResult.success) return;
 
+   var projType = this.getProjectionType();
+
+   // Warn that non-TAN projections require a circular mask for AnnotateImage
+   if (projType !== "TAN") {
+      var projNames = { "ZEA": "ZEA (Equal-area)", "STG": "STG (Stereographic)" };
+      var mb = new MessageBox(
+         "<p><b>Warning: " + (projNames[projType] || projType) + " projection selected</b></p>" +
+         "<p>For circular fisheye images on a square sensor, the frame corners fall outside " +
+         "the fisheye circle (black area with no sky data). Without a mask, AnnotateImage " +
+         "will fail with:</p>" +
+         "<p><i>AstrometricMetadata::Verify(): Failed to perform ImageToCelestial() " +
+         "coordinate transformation, step 2.</i></p>" +
+         "<p><b>After applying WCS, apply a circular mask matching the fisheye circle " +
+         "boundary before running AnnotateImage.</b></p>",
+         "Apply to Image — Fisheye Projection Warning",
+         StdIcon_Warning,
+         StdButton_Ok, StdButton_Cancel
+      );
+      if (mb.execute() !== StdButton_Ok) return;
+   }
+
    console.writeln("");
    console.writeln("<b>Applying WCS to image...</b>");
-
-   var projType = this.getProjectionType();
    applyWCSToImage(this.targetWindow, this.wcsResult, this.image.width, this.image.height, projType);
 
    // 制御点を直接書き込み（regenerateAstrometricSolution の Y 軸解釈に依存しない）
@@ -2512,7 +2531,7 @@ ManualSolverDialog.prototype.doImport = function () {
 
    // Restore projection type
    if (data.projectionType) {
-      var projTypes = ["TAN", "ZEA", "ARC", "STG"];
+      var projTypes = ["TAN", "ZEA", "STG"];
       var projIdx = projTypes.indexOf(data.projectionType);
       if (projIdx >= 0) {
          this.projectionComboBox.currentItem = projIdx;
@@ -2592,7 +2611,7 @@ function main() {
       }
       dlg.suggestCheckBox.checked = restoredSuggestEnabled;
       dlg.magLimitSpinBox.value = restoredMagLimit;
-      var projTypes = ["TAN", "ZEA", "ARC", "STG"];
+      var projTypes = ["TAN", "ZEA", "STG"];
       var projIdx = projTypes.indexOf(restoredProjectionType);
       if (projIdx >= 0) {
          dlg.projectionComboBox.currentItem = projIdx;

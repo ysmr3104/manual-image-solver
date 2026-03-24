@@ -742,7 +742,8 @@ test("skyToPixel: WCSFitterの結果でラウンドトリップ", function () {
 //============================================================================
 
 test("PROJECTION_INFO: 全キーの存在と ctype/piName 確認", function () {
-   var types = ["TAN", "ZEA", "ARC", "STG"];
+   // ARC (ZenithalEquidistant) is excluded: PixInsight PCL does not support it
+   var types = ["TAN", "ZEA", "STG"];
    for (var i = 0; i < types.length; i++) {
       var t = types[i];
       assertTrue(PROJECTION_INFO[t] !== undefined, t + " exists in PROJECTION_INFO");
@@ -752,8 +753,8 @@ test("PROJECTION_INFO: 全キーの存在と ctype/piName 確認", function () {
    }
    assertEqual(PROJECTION_INFO["TAN"].piName, "Gnomonic", "TAN piName");
    assertEqual(PROJECTION_INFO["ZEA"].piName, "ZenithalEqualArea", "ZEA piName");
-   assertEqual(PROJECTION_INFO["ARC"].piName, "ZenithalEquidistant", "ARC piName");
    assertEqual(PROJECTION_INFO["STG"].piName, "Stereographic", "STG piName");
+   assertTrue(PROJECTION_INFO["ARC"] === undefined, "ARC is not in PROJECTION_INFO (unsupported by PixInsight PCL)");
 });
 
 //============================================================================
