@@ -1,6 +1,6 @@
 [English](README.md)
 
-# Manual Image Solver v1.4.0
+# Manual Image Solver v1.4.1
 
 手動プレートソルブツール。画像上の星をユーザーが手動で同定し、天頂投影法（TAN / ZEA / STG）から選択した WCS（World Coordinate System）を算出して画像に適用します。魚眼レンズにも対応。
 

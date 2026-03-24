@@ -11,7 +11,7 @@
 // Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.4.0"
+#define VERSION "1.4.1"
 
 #include <pjsr/DataType.jsh>
 #include <pjsr/StdIcon.jsh>
