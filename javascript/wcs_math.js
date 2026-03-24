@@ -1,7 +1,8 @@
 //============================================================================
 // wcs_math.js - WCS Math Library
 //
-// Provides TAN (gnomonic) projection, CD matrix fitting, and centroid computation.
+// Provides zenithal projections (TAN/ZEA/ARC/STG), CD matrix fitting,
+// and centroid computation.
 // Pure JavaScript compatible with both PJSR and Node.js.
 //
 // Copyright (c) 2024-2025 Split Image Solver Project
@@ -10,12 +11,25 @@
 // Math is available by default in both PJSR and Node.js environments.
 
 //----------------------------------------------------------------------------
-// TAN (gnomonic) projection: celestial coordinates -> standard coordinates
+// Projection type metadata
+//----------------------------------------------------------------------------
+// Supported projections: TAN, ZEA, STG only.
+// ARC (ZenithalEquidistant) is NOT supported by PixInsight PCL ProjectionFactory
+// and causes "Invalid/unsupported projection identifier" on regenerateAstrometricSolution().
+var PROJECTION_INFO = {
+   "TAN": { ctype1: "RA---TAN", ctype2: "DEC--TAN", piName: "Gnomonic" },
+   "ZEA": { ctype1: "RA---ZEA", ctype2: "DEC--ZEA", piName: "ZenithalEqualArea" },
+   "STG": { ctype1: "RA---STG", ctype2: "DEC--STG", piName: "Stereographic" }
+};
+
+//----------------------------------------------------------------------------
+// Zenithal projection: celestial coordinates -> standard coordinates
+//   projType: "TAN", "ZEA", "ARC", or "STG"
 //   crval: [ra0, dec0] in degrees
 //   coord: [ra, dec] in degrees
-//   Returns: [xi, eta] in degrees
+//   Returns: [xi, eta] in degrees, or null if projection fails
 //----------------------------------------------------------------------------
-function tanProject(crval, coord) {
+function zenithalProject(projType, crval, coord) {
    var ra0  = crval[0] * Math.PI / 180.0;
    var dec0 = crval[1] * Math.PI / 180.0;
    var ra   = coord[0] * Math.PI / 180.0;
@@ -28,24 +42,44 @@ function tanProject(crval, coord) {
    var dRA     = ra - ra0;
    var cosDRA  = Math.cos(dRA);
 
+   // D = cos(theta) where theta is the angular distance from the projection center
    var D = sinDec0 * sinDec + cosDec0 * cosDec * cosDRA;
-   if (D <= 0) {
-      return null; // Cannot project (opposite hemisphere)
+
+   // Compute zenith angle theta and azimuth phi
+   var theta = Math.acos(Math.max(-1, Math.min(1, D)));
+   var phi = Math.atan2(cosDec * Math.sin(dRA),
+                        cosDec0 * sinDec - sinDec0 * cosDec * cosDRA);
+
+   // Radial distance r depends on projection type
+   var r;
+   if (projType === "TAN") {
+      if (D <= 0) return null; // Cannot project beyond 90 degrees
+      r = Math.tan(theta);
+   } else if (projType === "ZEA") {
+      r = 2.0 * Math.sin(theta / 2.0);
+   } else if (projType === "ARC") {
+      r = theta;
+   } else if (projType === "STG") {
+      if (theta >= Math.PI) return null; // Cannot project at 180 degrees
+      r = 2.0 * Math.tan(theta / 2.0);
+   } else {
+      return null; // Unknown projection
    }
 
-   var xi  = (cosDec * Math.sin(dRA)) / D * (180.0 / Math.PI);
-   var eta = (cosDec0 * sinDec - sinDec0 * cosDec * cosDRA) / D * (180.0 / Math.PI);
+   var xi  = (180.0 / Math.PI) * r * Math.sin(phi);
+   var eta = (180.0 / Math.PI) * r * Math.cos(phi);
 
    return [xi, eta];
 }
 
 //----------------------------------------------------------------------------
-// TAN inverse projection: standard coordinates -> celestial coordinates
+// Zenithal inverse projection: standard coordinates -> celestial coordinates
+//   projType: "TAN", "ZEA", "ARC", or "STG"
 //   crval: [ra0, dec0] in degrees
 //   standard: [xi, eta] in degrees
 //   Returns: [ra, dec] in degrees
 //----------------------------------------------------------------------------
-function tanDeproject(crval, standard) {
+function zenithalDeproject(projType, crval, standard) {
    var ra0  = crval[0] * Math.PI / 180.0;
    var dec0 = crval[1] * Math.PI / 180.0;
    var xi   = standard[0] * Math.PI / 180.0;
@@ -57,7 +91,20 @@ function tanDeproject(crval, standard) {
       return [crval[0], crval[1]];
    }
 
-   var c = Math.atan(rho);
+   // Angular distance c depends on projection type
+   var c;
+   if (projType === "TAN") {
+      c = Math.atan(rho);
+   } else if (projType === "ZEA") {
+      c = 2.0 * Math.asin(Math.min(rho / 2.0, 1.0));
+   } else if (projType === "ARC") {
+      c = rho;
+   } else if (projType === "STG") {
+      c = 2.0 * Math.atan(rho / 2.0);
+   } else {
+      return [crval[0], crval[1]]; // Unknown projection, return center
+   }
+
    var cosC = Math.cos(c);
    var sinC = Math.sin(c);
    var cosDec0 = Math.cos(dec0);
@@ -72,6 +119,17 @@ function tanDeproject(crval, standard) {
    while (raDeg >= 360.0) raDeg -= 360.0;
 
    return [raDeg, dec * 180.0 / Math.PI];
+}
+
+//----------------------------------------------------------------------------
+// TAN (gnomonic) projection wrappers for backward compatibility
+//----------------------------------------------------------------------------
+function tanProject(crval, coord) {
+   return zenithalProject("TAN", crval, coord);
+}
+
+function tanDeproject(crval, standard) {
+   return zenithalDeproject("TAN", crval, standard);
 }
 
 //----------------------------------------------------------------------------
@@ -205,10 +263,11 @@ function solveMinNorm(D, b) {
 //   starPairs: array of [{px, py, ra, dec, name}] (requires 3 or more)
 //   imageWidth, imageHeight: image dimensions in pixels
 //----------------------------------------------------------------------------
-function WCSFitter(starPairs, imageWidth, imageHeight) {
+function WCSFitter(starPairs, imageWidth, imageHeight, projectionType) {
    this.stars = starPairs;
    this.width = imageWidth;
    this.height = imageHeight;
+   this.projectionType = projectionType || "TAN";
    // CRPIX is the image center (FITS 1-based)
    this.crpix1 = imageWidth / 2.0 + 0.5;
    this.crpix2 = imageHeight / 2.0 + 0.5;
@@ -267,12 +326,12 @@ WCSFitter.prototype.solve = function () {
    for (var iter = 0; iter < maxIter; iter++) {
       var crval = [crval1, crval2];
 
-      // Compute standard coordinates via TAN projection
+      // Compute standard coordinates via zenithal projection
       var projOk = true;
       var xiArr = [];
       var etaArr = [];
       for (var i = 0; i < nStars; i++) {
-         var proj = tanProject(crval, [stars[i].ra, stars[i].dec]);
+         var proj = zenithalProject(this.projectionType, crval, [stars[i].ra, stars[i].dec]);
          if (proj === null) {
             projOk = false;
             break;
@@ -284,7 +343,7 @@ WCSFitter.prototype.solve = function () {
       if (!projOk) {
          return {
             success: false,
-            message: "TAN projection failed (stars may be in the opposite hemisphere)"
+            message: this.projectionType + " projection failed (stars may be in the opposite hemisphere)"
          };
       }
 
@@ -341,14 +400,14 @@ WCSFitter.prototype.solve = function () {
       var meanDEta = sumDEta / nStars;
 
       // Inverse transform residual centroid to celestial coords and update CRVAL
-      var newCrval = tanDeproject([crval1, crval2], [meanDXi, meanDEta]);
+      var newCrval = zenithalDeproject(this.projectionType, [crval1, crval2], [meanDXi, meanDEta]);
 
-      // Verify that updated CRVAL doesn't break TAN projection for any star.
-      // For wide-field images, the non-linear TAN projection can cause the
-      // CRVAL update to overshoot, pushing edge stars beyond the 90-degree limit.
+      // Verify that updated CRVAL doesn't break projection for any star.
+      // For wide-field images, the non-linear projection can cause the
+      // CRVAL update to overshoot, pushing edge stars beyond the limit.
       var updateOk = true;
       for (var j = 0; j < nStars; j++) {
-         if (tanProject(newCrval, [stars[j].ra, stars[j].dec]) === null) {
+         if (zenithalProject(this.projectionType, newCrval, [stars[j].ra, stars[j].dec]) === null) {
             updateOk = false;
             break;
          }
@@ -365,7 +424,7 @@ WCSFitter.prototype.solve = function () {
       }
    }
 
-   // --- 5. Compute TAN-only residuals ---
+   // --- 5. Compute residuals ---
    var crval = [crval1, crval2];
    var residuals = [];
    var totalResidSq = 0;
@@ -376,7 +435,7 @@ WCSFitter.prototype.solve = function () {
 
       var predXi  = cd[0][0] * u + cd[0][1] * v;
       var predEta = cd[1][0] * u + cd[1][1] * v;
-      var predCoord = tanDeproject(crval, [predXi, predEta]);
+      var predCoord = zenithalDeproject(this.projectionType, crval, [predXi, predEta]);
       var resid = angularSeparation([stars[i].ra, stars[i].dec], predCoord);
       var residArcsec = resid * 3600.0;
       residuals.push({
@@ -398,6 +457,7 @@ WCSFitter.prototype.solve = function () {
       crpix1: crpix1,
       crpix2: crpix2,
       cd: cd,
+      projectionType: this.projectionType,
       pixelScale_arcsec: pixelScaleArcsec,
       rms_arcsec: rmsArcsec,
       residuals: residuals,
@@ -413,8 +473,9 @@ WCSFitter.prototype.solve = function () {
 //   imageHeight: image height in pixels
 //   Returns: {px, py} in 0-based PixInsight coordinates, or null if on opposite hemisphere
 //----------------------------------------------------------------------------
-function skyToPixel(ra, dec, wcsResult, imageHeight) {
-   var proj = tanProject([wcsResult.crval1, wcsResult.crval2], [ra, dec]);
+function skyToPixel(ra, dec, wcsResult, imageHeight, projectionType) {
+   var projType = projectionType || wcsResult.projectionType || "TAN";
+   var proj = zenithalProject(projType, [wcsResult.crval1, wcsResult.crval2], [ra, dec]);
    if (!proj) return null;
 
    var xi = proj[0];
@@ -497,6 +558,9 @@ if (typeof module !== "undefined") {
    module.exports = {
       tanProject: tanProject,
       tanDeproject: tanDeproject,
+      zenithalProject: zenithalProject,
+      zenithalDeproject: zenithalDeproject,
+      PROJECTION_INFO: PROJECTION_INFO,
       angularSeparation: angularSeparation,
       solveLinearSystem: solveLinearSystem,
       solveMinNorm: solveMinNorm,
