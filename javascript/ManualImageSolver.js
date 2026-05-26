@@ -13,7 +13,7 @@
 // Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "1.4.1"
+#define VERSION "2.0.0"
 
 
 #include "wcs_math.js"
