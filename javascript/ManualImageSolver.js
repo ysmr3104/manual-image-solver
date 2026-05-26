@@ -1,3 +1,5 @@
+#engine v8
+
 #feature-id    ManualImageSolver : Astrometry > ManualImageSolver
 #feature-info  Manual plate solver: interactively identify stars in a PJSR dialog \
    and compute a TAN-projection WCS solution, then apply it to the active image.
@@ -13,21 +15,12 @@
 
 #define VERSION "1.4.1"
 
-#include <pjsr/DataType.jsh>
-#include <pjsr/StdIcon.jsh>
-#include <pjsr/StdButton.jsh>
-#include <pjsr/StdCursor.jsh>
-#include <pjsr/TextAlign.jsh>
-#include <pjsr/Sizer.jsh>
-#include <pjsr/UndoFlag.jsh>
-#include <pjsr/NumericControl.jsh>
-#include <pjsr/Color.jsh>
-#include <pjsr/PropertyType.jsh>
-#include <pjsr/PropertyAttribute.jsh>
 
 #include "wcs_math.js"
 #include "wcs_keywords.js"
 #include "catalog_data.js"
+
+CoreApplication.ensureMinimumVersion( 1, 9, 4 );
 
 #define TITLE "Manual Image Solver"
 
@@ -219,7 +212,7 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight, proje
 
    // Write PCL:AstrometricSolution properties required by SPFC and other tools.
    var view = targetWindow.mainView;
-   var attrs = PropertyAttribute_Storable | PropertyAttribute_Permanent;
+   var attrs = PropertyAttribute.Storable | PropertyAttribute.Permanent;
 
    // Remove any existing SplineWorldTransformation properties from previous solutions.
    var existingProps = view.properties;
@@ -232,17 +225,17 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight, proje
    view.deleteProperty("PCL:AstrometricSolution:Information");
 
    // Projection system
-   view.setPropertyValue("PCL:AstrometricSolution:ProjectionSystem", PROJECTION_INFO[projType].piName, PropertyType_String8, attrs);
+   view.setPropertyValue("PCL:AstrometricSolution:ProjectionSystem", PROJECTION_INFO[projType].piName, PropertyType.String8, attrs);
 
    // Reference celestial coordinates (degrees)
    var refCelestial = new Vector([wcsResult.crval1, wcsResult.crval2]);
-   view.setPropertyValue("PCL:AstrometricSolution:ReferenceCelestialCoordinates", refCelestial, PropertyType_F64Vector, attrs);
+   view.setPropertyValue("PCL:AstrometricSolution:ReferenceCelestialCoordinates", refCelestial, PropertyType.F64Vector, attrs);
 
    // Reference image coordinates (I-coordinates: 0-based x, bottom-up y)
    var refImgX = wcsResult.crpix1 - 1;
    var refImgY = wcsResult.crpix2;
    var refImage = new Vector([refImgX, refImgY]);
-   view.setPropertyValue("PCL:AstrometricSolution:ReferenceImageCoordinates", refImage, PropertyType_F64Vector, attrs);
+   view.setPropertyValue("PCL:AstrometricSolution:ReferenceImageCoordinates", refImage, PropertyType.F64Vector, attrs);
 
    // Linear transformation matrix (CD matrix)
    var ltMatrix = new Matrix(2, 2);
@@ -250,32 +243,32 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight, proje
    ltMatrix.at(0, 1, wcsResult.cd[0][1]);
    ltMatrix.at(1, 0, wcsResult.cd[1][0]);
    ltMatrix.at(1, 1, wcsResult.cd[1][1]);
-   view.setPropertyValue("PCL:AstrometricSolution:LinearTransformationMatrix", ltMatrix, PropertyType_F64Matrix, attrs);
+   view.setPropertyValue("PCL:AstrometricSolution:LinearTransformationMatrix", ltMatrix, PropertyType.F64Matrix, attrs);
 
    // Native coordinates of the reference point (TAN: 0, 90)
    var refNative = new Vector([0, 90]);
-   view.setPropertyValue("PCL:AstrometricSolution:ReferenceNativeCoordinates", refNative, PropertyType_F64Vector, attrs);
+   view.setPropertyValue("PCL:AstrometricSolution:ReferenceNativeCoordinates", refNative, PropertyType.F64Vector, attrs);
 
    // Celestial pole native coordinates
    var plon = (wcsResult.crval2 < 90) ? 180 : 0;
    var celestialPole = new Vector([plon, 90]);
-   view.setPropertyValue("PCL:AstrometricSolution:CelestialPoleNativeCoordinates", celestialPole, PropertyType_F64Vector, attrs);
+   view.setPropertyValue("PCL:AstrometricSolution:CelestialPoleNativeCoordinates", celestialPole, PropertyType.F64Vector, attrs);
 
    // Observation center coordinates
-   view.setPropertyValue("Observation:Center:RA", imgCenter[0], PropertyType_Float64, attrs);
-   view.setPropertyValue("Observation:Center:Dec", imgCenter[1], PropertyType_Float64, attrs);
-   view.setPropertyValue("Observation:CelestialReferenceSystem", "ICRS", PropertyType_String8, attrs);
-   view.setPropertyValue("Observation:Equinox", 2000.0, PropertyType_Float64, attrs);
+   view.setPropertyValue("Observation:Center:RA", imgCenter[0], PropertyType.Float64, attrs);
+   view.setPropertyValue("Observation:Center:Dec", imgCenter[1], PropertyType.Float64, attrs);
+   view.setPropertyValue("Observation:CelestialReferenceSystem", "ICRS", PropertyType.String8, attrs);
+   view.setPropertyValue("Observation:Equinox", 2000.0, PropertyType.Float64, attrs);
 
    // Creation metadata
-   view.setPropertyValue("PCL:AstrometricSolution:CreationTime", (new Date).toISOString(), PropertyType_TimePoint, attrs);
+   view.setPropertyValue("PCL:AstrometricSolution:CreationTime", (new Date).toISOString(), PropertyType.TimePoint, attrs);
    var creatorApp = format("PixInsight %s%d.%d.%d",
       CoreApplication.versionLE ? "LE " : "",
       CoreApplication.versionMajor,
       CoreApplication.versionMinor,
       CoreApplication.versionRelease);
-   view.setPropertyValue("PCL:AstrometricSolution:CreatorApplication", creatorApp, PropertyType_String, attrs);
-   view.setPropertyValue("PCL:AstrometricSolution:CreatorModule", "ManualImageSolver " + VERSION, PropertyType_String, attrs);
+   view.setPropertyValue("PCL:AstrometricSolution:CreatorApplication", creatorApp, PropertyType.String, attrs);
+   view.setPropertyValue("PCL:AstrometricSolution:CreatorModule", "ManualImageSolver " + VERSION, PropertyType.String, attrs);
 
    // NOTE: Do NOT call regenerateAstrometricSolution() here.
    // The caller (doApply) writes spline control points first, then regenerates.
@@ -320,16 +313,16 @@ function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageH
       cW.at(i * 2 + 1, starPoints[i].eta);
    }
 
-   var attrs = PropertyAttribute_Storable | PropertyAttribute_Permanent;
+   var attrs = PropertyAttribute.Storable | PropertyAttribute.Permanent;
    var prefix = "PCL:AstrometricSolution:SplineWorldTransformation:";
-   view.setPropertyValue(prefix + "RBFType", "ThinPlateSpline", PropertyType_String8, attrs);
-   view.setPropertyValue(prefix + "SplineOrder", 2, PropertyType_Int32, attrs);
-   view.setPropertyValue(prefix + "SplineSmoothness", smoothness, PropertyType_Float32, attrs);
-   view.setPropertyValue(prefix + "MaxSplinePoints", nTotal, PropertyType_Int32, attrs);
-   view.setPropertyValue(prefix + "UseSimplifiers", false, PropertyType_Boolean, attrs);
-   view.setPropertyValue(prefix + "SimplifierRejectFraction", 0.10, PropertyType_Float32, attrs);
-   view.setPropertyValue(prefix + "ControlPoints:Image", cI, PropertyType_F64Vector, attrs);
-   view.setPropertyValue(prefix + "ControlPoints:World", cW, PropertyType_F64Vector, attrs);
+   view.setPropertyValue(prefix + "RBFType", "ThinPlateSpline", PropertyType.String8, attrs);
+   view.setPropertyValue(prefix + "SplineOrder", 2, PropertyType.Int32, attrs);
+   view.setPropertyValue(prefix + "SplineSmoothness", smoothness, PropertyType.Float32, attrs);
+   view.setPropertyValue(prefix + "MaxSplinePoints", nTotal, PropertyType.Int32, attrs);
+   view.setPropertyValue(prefix + "UseSimplifiers", false, PropertyType.Boolean, attrs);
+   view.setPropertyValue(prefix + "SimplifierRejectFraction", 0.10, PropertyType.Float32, attrs);
+   view.setPropertyValue(prefix + "ControlPoints:Image", cI, PropertyType.F64Vector, attrs);
+   view.setPropertyValue(prefix + "ControlPoints:World", cW, PropertyType.F64Vector, attrs);
 
    console.writeln("  SplineWT control points: " + nTotal + " stars (smoothness=" + smoothness.toFixed(4) + ")");
 }
@@ -565,9 +558,9 @@ function rotateBitmap(bitmap, angle) {
 // - onPaint draws with offset applied
 //============================================================================
 
-function ImagePreviewControl(parent) {
-   this.__base__ = ScrollBox;
-   this.__base__(parent);
+var ImagePreviewControl = class extends ScrollBox {
+constructor(parent) {
+   super(parent);
 
    this.bitmap = null;        // Stretched bitmap (original, unrotated)
    this.displayBitmap = null; // Rotated bitmap for display
@@ -604,7 +597,7 @@ function ImagePreviewControl(parent) {
 
    var self = this;
 
-   this.viewport.cursor = new Cursor(StdCursor_Arrow);
+   this.viewport.cursor = new Cursor(StdCursor.Arrow);
 
    // --- Scrollbar events ---
    this.onHorizontalScrollPosUpdated = function (pos) {
@@ -729,7 +722,7 @@ function ImagePreviewControl(parent) {
       if (!self.hasMoved) {
          if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
             self.hasMoved = true;
-            self.viewport.cursor = new Cursor(StdCursor_ClosedHand);
+            self.viewport.cursor = new Cursor(StdCursor.ClosedHand);
          }
       }
 
@@ -757,7 +750,7 @@ function ImagePreviewControl(parent) {
 
       self.isDragging = false;
       self.hasMoved = false;
-      self.viewport.cursor = new Cursor(StdCursor_Arrow);
+      self.viewport.cursor = new Cursor(StdCursor.Arrow);
    };
 
    this.viewport.onMouseWheel = function (x, y, delta, buttonState, modifiers) {
@@ -800,10 +793,9 @@ function ImagePreviewControl(parent) {
    };
 }
 
-ImagePreviewControl.prototype = new ScrollBox;
 
 // Convert original image coords to rotated display bitmap coords (continuous)
-ImagePreviewControl.prototype.imageToDisplay = function (imgX, imgY) {
+imageToDisplay(imgX, imgY) {
    var bx = imgX * this.bitmapScale;
    var by = imgY * this.bitmapScale;
    var bmpW = this.bitmap.width;
@@ -817,7 +809,7 @@ ImagePreviewControl.prototype.imageToDisplay = function (imgX, imgY) {
 };
 
 // Convert rotated display bitmap coords to original image coords (continuous)
-ImagePreviewControl.prototype.displayToImage = function (rx, ry) {
+displayToImage(rx, ry) {
    var bx, by;
    var bmpW = this.bitmap.width;
    var bmpH = this.bitmap.height;
@@ -831,7 +823,7 @@ ImagePreviewControl.prototype.displayToImage = function (rx, ry) {
 };
 
 // Set display rotation (0, 90, 180, 270) and rebuild display bitmap
-ImagePreviewControl.prototype.setRotation = function (angle) {
+setRotation(angle) {
    this.rotationAngle = angle % 360;
    if (this.bitmap) {
       this.displayBitmap = rotateBitmap(this.bitmap, this.rotationAngle);
@@ -842,7 +834,7 @@ ImagePreviewControl.prototype.setRotation = function (angle) {
 };
 
 // Clamp scroll position, sync scrollbars, and repaint
-ImagePreviewControl.prototype.setScroll = function (x, y) {
+setScroll(x, y) {
    this.scrollX = Math.max(0, Math.min(this.maxScrollX, Math.round(x)));
    this.scrollY = Math.max(0, Math.min(this.maxScrollY, Math.round(y)));
    // Sync scrollbars
@@ -851,7 +843,7 @@ ImagePreviewControl.prototype.setScroll = function (x, y) {
    this.viewport.update();
 };
 
-ImagePreviewControl.prototype.setBitmap = function (bitmapResult) {
+setBitmap(bitmapResult) {
    this.bitmap = bitmapResult.bitmap;
    this.bitmapScale = bitmapResult.scale;
    this.displayBitmap = rotateBitmap(this.bitmap, this.rotationAngle);
@@ -860,7 +852,7 @@ ImagePreviewControl.prototype.setBitmap = function (bitmapResult) {
    this.updateViewport();
 };
 
-ImagePreviewControl.prototype.updateViewport = function () {
+updateViewport() {
    var dbmp = this.displayBitmap || this.bitmap;
    if (!dbmp) return;
    var dispW = Math.round(dbmp.width * this.zoomLevel);
@@ -889,7 +881,7 @@ ImagePreviewControl.prototype.updateViewport = function () {
    this.viewport.update();
 };
 
-ImagePreviewControl.prototype.fitToWindow = function () {
+fitToWindow() {
    var dbmp = this.displayBitmap || this.bitmap;
    if (!dbmp) return;
    var viewW = this.viewport.width;
@@ -910,7 +902,7 @@ ImagePreviewControl.prototype.fitToWindow = function () {
 };
 
 // Return the zoomIndex nearest to the specified zoom level
-ImagePreviewControl.prototype.findNearestZoomIndex = function (zoom) {
+findNearestZoomIndex(zoom) {
    var bestIdx = 0;
    var bestDiff = Math.abs(this.zoomLevels[0] - zoom);
    for (var i = 1; i < this.zoomLevels.length; i++) {
@@ -924,7 +916,7 @@ ImagePreviewControl.prototype.findNearestZoomIndex = function (zoom) {
 };
 
 // Zoom centered on the viewport center
-ImagePreviewControl.prototype.zoomAroundCenter = function (newZoom) {
+zoomAroundCenter(newZoom) {
    var oldZoom = this.zoomLevel;
    if (Math.abs(oldZoom - newZoom) < 1e-9) return;
 
@@ -946,12 +938,12 @@ ImagePreviewControl.prototype.zoomAroundCenter = function (newZoom) {
    this.updateViewport(); // Clamp + scrollbar update + repaint
 };
 
-ImagePreviewControl.prototype.zoom11 = function () {
+zoom11() {
    this.zoomIndex = this.findNearestZoomIndex(1.0);
    this.zoomAroundCenter(this.zoomLevels[this.zoomIndex]);
 };
 
-ImagePreviewControl.prototype.zoomIn = function () {
+zoomIn() {
    var newIdx = -1;
    for (var i = 0; i < this.zoomLevels.length; i++) {
       if (this.zoomLevels[i] > this.zoomLevel + 1e-6) {
@@ -965,7 +957,7 @@ ImagePreviewControl.prototype.zoomIn = function () {
    }
 };
 
-ImagePreviewControl.prototype.zoomOut = function () {
+zoomOut() {
    var newIdx = -1;
    for (var i = this.zoomLevels.length - 1; i >= 0; i--) {
       if (this.zoomLevels[i] < this.zoomLevel - 1e-6) {
@@ -979,13 +971,15 @@ ImagePreviewControl.prototype.zoomOut = function () {
    }
 };
 
+};
+
 //============================================================================
 // StarEditDialog: Star coordinate entry sub-dialog
 //============================================================================
 
-function StarEditDialog(parent, starIndex, starData) {
-   this.__base__ = Dialog;
-   this.__base__();
+var StarEditDialog = class extends Dialog {
+constructor(parent, starIndex, starData) {
+   super();
 
    var self = this;
    this.starData = starData || { px: 0, py: 0, ra: null, dec: null, name: "" };
@@ -997,12 +991,12 @@ function StarEditDialog(parent, starIndex, starData) {
    var pixelLabel = new Label(this);
    pixelLabel.text = "Pixel:  X = " + this.starData.px.toFixed(2)
                    + "    Y = " + this.starData.py.toFixed(2);
-   pixelLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+   pixelLabel.textAlignment = TextAlignment.Left | TextAlignment.VertCenter;
 
    // --- Object name + search ---
    var nameLabel = new Label(this);
    nameLabel.text = "Name:";
-   nameLabel.textAlignment = TextAlign_Right | TextAlign_VertCenter;
+   nameLabel.textAlignment = TextAlignment.Right | TextAlignment.VertCenter;
    nameLabel.setFixedWidth(60);
 
    this.nameEdit = new Edit(this);
@@ -1016,7 +1010,7 @@ function StarEditDialog(parent, starIndex, starData) {
       var name = self.nameEdit.text.trim();
       if (name.length === 0) {
          var mb = new MessageBox("Please enter an object name.",
-            TITLE, StdIcon_Warning, StdButton_Ok);
+            TITLE, StdIcon.Warning, StdButton.Ok);
          mb.execute();
          return;
       }
@@ -1030,7 +1024,7 @@ function StarEditDialog(parent, starIndex, starData) {
       } else {
          var mb = new MessageBox(
             "'" + name + "' not found.\nPlease enter RA/DEC manually.",
-            TITLE, StdIcon_Warning, StdButton_Ok);
+            TITLE, StdIcon.Warning, StdButton.Ok);
          mb.execute();
       }
    };
@@ -1044,7 +1038,7 @@ function StarEditDialog(parent, starIndex, starData) {
    // --- RA ---
    var raLabel = new Label(this);
    raLabel.text = "RA:";
-   raLabel.textAlignment = TextAlign_Right | TextAlign_VertCenter;
+   raLabel.textAlignment = TextAlignment.Right | TextAlignment.VertCenter;
    raLabel.setFixedWidth(60);
 
    this.raEdit = new Edit(this);
@@ -1065,7 +1059,7 @@ function StarEditDialog(parent, starIndex, starData) {
    // --- DEC ---
    var decLabel = new Label(this);
    decLabel.text = "DEC:";
-   decLabel.textAlignment = TextAlign_Right | TextAlign_VertCenter;
+   decLabel.textAlignment = TextAlignment.Right | TextAlignment.VertCenter;
    decLabel.setFixedWidth(60);
 
    this.decEdit = new Edit(this);
@@ -1094,19 +1088,19 @@ function StarEditDialog(parent, starIndex, starData) {
 
       if (ra === null || dec === null) {
          var mb = new MessageBox("Please enter valid RA and DEC values.",
-            TITLE, StdIcon_Warning, StdButton_Ok);
+            TITLE, StdIcon.Warning, StdButton.Ok);
          mb.execute();
          return;
       }
       if (ra < 0 || ra >= 360) {
          var mb = new MessageBox("RA must be in the range 0 to 360 degrees.",
-            TITLE, StdIcon_Warning, StdButton_Ok);
+            TITLE, StdIcon.Warning, StdButton.Ok);
          mb.execute();
          return;
       }
       if (dec < -90 || dec > 90) {
          var mb = new MessageBox("DEC must be in the range -90 to +90 degrees.",
-            TITLE, StdIcon_Warning, StdButton_Ok);
+            TITLE, StdIcon.Warning, StdButton.Ok);
          mb.execute();
          return;
       }
@@ -1145,15 +1139,15 @@ function StarEditDialog(parent, starIndex, starData) {
    this.adjustToContents();
 }
 
-StarEditDialog.prototype = new Dialog;
+};
 
 //============================================================================
 // ManualSolverDialog: Main dialog
 //============================================================================
 
-function ManualSolverDialog(targetWindow) {
-   this.__base__ = Dialog;
-   this.__base__();
+var ManualSolverDialog = class extends Dialog {
+constructor(targetWindow) {
+   super();
 
    var self = this;
    this.targetWindow = targetWindow;
@@ -1223,7 +1217,7 @@ function ManualSolverDialog(targetWindow) {
 
    var stretchLabel = new Label(this);
    stretchLabel.text = "STF:";
-   stretchLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+   stretchLabel.textAlignment = TextAlignment.Left | TextAlignment.VertCenter;
 
    this.stretchNoneButton = new PushButton(this);
    this.stretchNoneButton.text = "None";
@@ -1291,7 +1285,7 @@ function ManualSolverDialog(targetWindow) {
 
    var catCategoryLabel = new Label(this.catalogPanel);
    catCategoryLabel.text = "Category:";
-   catCategoryLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+   catCategoryLabel.textAlignment = TextAlignment.Left | TextAlignment.VertCenter;
 
    this.catalogCategoryCombo = new ComboBox(this.catalogPanel);
    this.catalogCategoryCombo.addItem("Navigation Stars");
@@ -1314,7 +1308,7 @@ function ManualSolverDialog(targetWindow) {
 
    var catSearchLabel = new Label(this.catalogPanel);
    catSearchLabel.text = "Search:";
-   catSearchLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+   catSearchLabel.textAlignment = TextAlignment.Left | TextAlignment.VertCenter;
 
    this.catalogSearchEdit = new Edit(this.catalogPanel);
    this.catalogSearchEdit.toolTip = "Filter by name (incremental search)";
@@ -1377,7 +1371,7 @@ function ManualSolverDialog(targetWindow) {
 
    var magLimitLabel = new Label(this.catalogPanel);
    magLimitLabel.text = "Mag \u2264";
-   magLimitLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+   magLimitLabel.textAlignment = TextAlignment.Left | TextAlignment.VertCenter;
 
    this.magLimitSpinBox = new SpinBox(this.catalogPanel);
    this.magLimitSpinBox.minValue = 0;
@@ -1420,7 +1414,7 @@ function ManualSolverDialog(targetWindow) {
 
    var greekLegend = new Label(this);
    greekLegend.text = "\u03b1:Alp  \u03b2:Bet  \u03b3:Gam  \u03b4:Del  \u03b5:Eps  \u03b6:Zet  \u03b7:Eta  \u03b8:The  \u03b9:Iot  \u03ba:Kap  \u03bb:Lam  \u03bc:Mu  \u03bd:Nu  \u03be:Xi  \u03bf:Omi  \u03c0:Pi  \u03c1:Rho  \u03c3:Sig  \u03c4:Tau  \u03c5:Ups  \u03c6:Phi  \u03c7:Chi  \u03c8:Psi  \u03c9:Ome";
-   greekLegend.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+   greekLegend.textAlignment = TextAlignment.Left | TextAlignment.VertCenter;
 
    this.starTreeBox = new TreeBox(this);
    this.starTreeBox.alternateRowColor = true;
@@ -1434,7 +1428,7 @@ function ManualSolverDialog(targetWindow) {
    this.starTreeBox.setHeaderText(4, "RA");
    this.starTreeBox.setHeaderText(5, "DEC");
    this.starTreeBox.setHeaderText(6, "Residual");
-   this.starTreeBox.setHeaderAlignment(0, TextAlign_Left | TextAlign_VertCenter);
+   this.starTreeBox.setHeaderAlignment(0, TextAlignment.Left | TextAlignment.VertCenter);
    this.starTreeBox.setColumnWidth(0, 45);
    this.starTreeBox.setColumnWidth(1, 65);
    this.starTreeBox.setColumnWidth(2, 65);
@@ -1497,8 +1491,8 @@ function ManualSolverDialog(targetWindow) {
    this.clearStarsButton.onClick = function () {
       if (self.starPairs.length === 0) return;
       var mb = new MessageBox("Remove all stars?",
-         TITLE, StdIcon_Question, StdButton_Yes, StdButton_No);
-      if (mb.execute() === StdButton_Yes) {
+         TITLE, StdIcon.Question, StdButton.Yes, StdButton.No);
+      if (mb.execute() === StdButton.Yes) {
          self.starPairs = [];
          self.wcsResult = null;
          self.refreshAll();
@@ -1532,7 +1526,7 @@ function ManualSolverDialog(targetWindow) {
    // --- Status label ---
    this.statusLabel = new Label(this);
    this.statusLabel.text = "Click on stars in the image to register them.";
-   this.statusLabel.textAlignment = TextAlign_Left | TextAlign_VertCenter;
+   this.statusLabel.textAlignment = TextAlignment.Left | TextAlignment.VertCenter;
 
    // --- Main buttons ---
    this.solveButton = new PushButton(this);
@@ -1636,13 +1630,11 @@ function ManualSolverDialog(targetWindow) {
    };
 }
 
-ManualSolverDialog.prototype = new Dialog;
-
 //----------------------------------------------------------------------------
 // Image click handler
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.onImageClicked = function (imgX, imgY) {
+onImageClicked(imgX, imgY) {
    // Centroid computation
    var centroid = computeCentroid(this.image, imgX, imgY, 10);
    var cx = centroid ? centroid.x : imgX;
@@ -1666,7 +1658,7 @@ ManualSolverDialog.prototype.onImageClicked = function (imgX, imgY) {
 // Edit star
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.editStar = function (index) {
+editStar(index) {
    var existing = this.starPairs[index];
    var starData = { px: existing.px, py: existing.py, ra: existing.ra, dec: existing.dec, name: existing.name };
 
@@ -1682,7 +1674,7 @@ ManualSolverDialog.prototype.editStar = function (index) {
 // Catalog pairing: pair pending click with catalog entry
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.pairWithCatalogEntry = function (node) {
+pairWithCatalogEntry(node) {
    if (!this.pendingClick) {
       this.statusLabel.text = "Click a star in the image first, then select from catalog.";
       return;
@@ -1749,13 +1741,13 @@ ManualSolverDialog.prototype.pairWithCatalogEntry = function (node) {
    this.refreshAll();
 };
 
-ManualSolverDialog.prototype.clearPendingClick = function () {
+clearPendingClick() {
    this.pendingClick = null;
    this.preview.pendingMarker = null;
    this.preview.viewport.update();
 };
 
-ManualSolverDialog.prototype.manualEntryForPending = function () {
+manualEntryForPending() {
    if (!this.pendingClick) {
       this.statusLabel.text = "No pending star click. Click a star in the image first.";
       return;
@@ -1777,7 +1769,7 @@ ManualSolverDialog.prototype.manualEntryForPending = function () {
 // UI update
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.refreshAll = function () {
+refreshAll() {
    // Update TreeBox
    this.starTreeBox.clear();
    for (var i = 0; i < this.starPairs.length; i++) {
@@ -1785,7 +1777,7 @@ ManualSolverDialog.prototype.refreshAll = function () {
       var node = new TreeBoxNode(this.starTreeBox);
       var num = i + 1;
       node.setText(0, (num < 10 ? "0" : "") + num);
-      node.setAlignment(0, TextAlign_Left | TextAlign_VertCenter);
+      node.setAlignment(0, TextAlignment.Left | TextAlignment.VertCenter);
       node.setText(1, s.px.toFixed(1));
       node.setText(2, s.py.toFixed(1));
       node.setText(3, s.name || "");
@@ -1844,7 +1836,7 @@ ManualSolverDialog.prototype.refreshAll = function () {
 // Catalog panel: build list based on category and search filter
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.buildCatalogList = function () {
+buildCatalogList() {
    this.catalogTreeBox.clear();
    var catIdx = this.catalogCategoryCombo.currentItem;
    var searchText = this.catalogSearchEdit.text.trim().toLowerCase();
@@ -1980,7 +1972,7 @@ ManualSolverDialog.prototype.buildCatalogList = function () {
 // Catalog panel: highlight candidate stars (nearest to clicked position)
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.updateCatalogCandidateHighlight = function () {
+updateCatalogCandidateHighlight() {
    if (!this.candidateRanking || this.candidateRanking.length === 0) return;
 
    // Build lookup: label -> rank (0=nearest)
@@ -2024,7 +2016,7 @@ ManualSolverDialog.prototype.updateCatalogCandidateHighlight = function () {
 // Catalog panel: update paired status (gray out already-paired entries)
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.updateCatalogPairedStatus = function () {
+updateCatalogPairedStatus() {
    // Build set of paired object names (lowercase)
    var pairedNames = {};
    for (var i = 0; i < this.starPairs.length; i++) {
@@ -2058,7 +2050,7 @@ ManualSolverDialog.prototype.updateCatalogPairedStatus = function () {
 // Candidate star suggestion: compute and display candidate markers
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.updateCandidateStars = function () {
+updateCandidateStars() {
    this.candidateStars = [];
    this.preview.candidateMarkers = null;
 
@@ -2118,7 +2110,7 @@ ManualSolverDialog.prototype.updateCandidateStars = function () {
 // Highlight nearest candidates in catalog list when image is clicked
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.highlightNearestCandidates = function (px, py) {
+highlightNearestCandidates(px, py) {
    if (!this.candidateStars || this.candidateStars.length === 0) return;
 
    // Compute distance to each candidate
@@ -2192,15 +2184,15 @@ ManualSolverDialog.prototype.highlightNearestCandidates = function (px, py) {
 // Rebuild bitmap (on stretch mode change)
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.updateStretchButtons = function () {
+updateStretchButtons() {
    this.stretchNoneButton.text = (this.stretchMode === "none") ? "\u25B6None" : "None";
    this.stretchLinkedButton.text = (this.stretchMode === "linked") ? "\u25B6Linked" : "Linked";
    this.stretchUnlinkedButton.text = (this.stretchMode === "unlinked") ? "\u25B6Unlinked" : "Unlinked";
 };
 
-ManualSolverDialog.prototype.rebuildBitmap = function () {
-   this.cursor = new Cursor(StdCursor_Wait);
-   processEvents();
+rebuildBitmap() {
+   this.cursor = new Cursor(StdCursor.Wait);
+   CoreApplication.processEvents();
    console.writeln("Rebuilding bitmap (" + this.stretchMode + ")...");
    console.flush();
    var bmpResult = createStretchedBitmap(this.image, MAX_BITMAP_EDGE, this.stretchMode);
@@ -2208,14 +2200,14 @@ ManualSolverDialog.prototype.rebuildBitmap = function () {
    this.preview.setBitmap(bmpResult);
    this.preview.fitToWindow();
    console.writeln("  Done.");
-   this.cursor = new Cursor(StdCursor_Arrow);
+   this.cursor = new Cursor(StdCursor.Arrow);
 };
 
 //----------------------------------------------------------------------------
 // Get selected projection type
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.getProjectionType = function () {
+getProjectionType() {
    var types = ["TAN", "ZEA", "STG"];
    return types[this.projectionComboBox.currentItem] || "TAN";
 };
@@ -2224,11 +2216,11 @@ ManualSolverDialog.prototype.getProjectionType = function () {
 // Solve
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.doSolve = function () {
+doSolve() {
    if (this.starPairs.length < 3) {
       var mb = new MessageBox(
          "At least 3 star pairs required (current: " + this.starPairs.length + ").",
-         TITLE, StdIcon_Warning, StdButton_Ok);
+         TITLE, StdIcon.Warning, StdButton.Ok);
       mb.execute();
       return;
    }
@@ -2238,7 +2230,7 @@ ManualSolverDialog.prototype.doSolve = function () {
 
    if (!this.wcsResult.success) {
       var mb = new MessageBox("WCS fitting failed:\n" + this.wcsResult.message,
-         TITLE, StdIcon_Error, StdButton_Ok);
+         TITLE, StdIcon.Error, StdButton.Ok);
       mb.execute();
       this.refreshAll();
       return;
@@ -2258,7 +2250,7 @@ ManualSolverDialog.prototype.doSolve = function () {
 // Apply to Image
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.doApply = function () {
+doApply() {
    if (!this.wcsResult || !this.wcsResult.success) return;
 
    var projType = this.getProjectionType();
@@ -2276,10 +2268,10 @@ ManualSolverDialog.prototype.doApply = function () {
          "<p><b>After applying WCS, apply a circular mask matching the fisheye circle " +
          "boundary before running AnnotateImage.</b></p>",
          "Apply to Image — Fisheye Projection Warning",
-         StdIcon_Warning,
-         StdButton_Ok, StdButton_Cancel
+         StdIcon.Warning,
+         StdButton.Ok, StdButton.Cancel
       );
-      if (mb.execute() !== StdButton_Ok) return;
+      if (mb.execute() !== StdButton.Ok) return;
    }
 
    console.writeln("");
@@ -2323,7 +2315,7 @@ ManualSolverDialog.prototype.doApply = function () {
       + "RMS: " + this.wcsResult.rms_arcsec.toFixed(3) + " arcsec\n"
       + "Pixel scale: " + this.wcsResult.pixelScale_arcsec.toFixed(3) + " arcsec/px\n"
       + "Stars: " + this.starPairs.length,
-      TITLE, StdIcon_Information, StdButton_Ok);
+      TITLE, StdIcon.Information, StdButton.Ok);
    mb.execute();
 };
 
@@ -2380,7 +2372,7 @@ function loadSession() {
 // Save session on dialog close
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.saveSessionData = function () {
+saveSessionData() {
    if (this.starPairs.length > 0) {
       saveSession(
          this.targetWindow.mainView.id,
@@ -2402,10 +2394,10 @@ ManualSolverDialog.prototype.saveSessionData = function () {
 // Export: Write star pair data to JSON file
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.doExport = function () {
+doExport() {
    if (this.starPairs.length === 0) {
       var mb = new MessageBox("No star pairs to export.",
-         TITLE, StdIcon_Warning, StdButton_Ok);
+         TITLE, StdIcon.Warning, StdButton.Ok);
       mb.execute();
       return;
    }
@@ -2442,11 +2434,11 @@ ManualSolverDialog.prototype.doExport = function () {
       f.close();
       console.writeln("Star pair data exported: " + sfd.fileName);
       var mb = new MessageBox("Star pair data exported (" + this.starPairs.length + " stars).",
-         TITLE, StdIcon_Information, StdButton_Ok);
+         TITLE, StdIcon.Information, StdButton.Ok);
       mb.execute();
    } catch (e) {
       var mb = new MessageBox("Failed to write file:\n" + e.message,
-         TITLE, StdIcon_Error, StdButton_Ok);
+         TITLE, StdIcon.Error, StdButton.Ok);
       mb.execute();
    }
 };
@@ -2455,7 +2447,7 @@ ManualSolverDialog.prototype.doExport = function () {
 // Import: Read star pair data from JSON file
 //----------------------------------------------------------------------------
 
-ManualSolverDialog.prototype.doImport = function () {
+doImport() {
    var ofd = new OpenFileDialog;
    ofd.caption = "Import Star Pair Data";
    ofd.filters = [["JSON files", "*.json"]];
@@ -2471,14 +2463,14 @@ ManualSolverDialog.prototype.doImport = function () {
       var data = JSON.parse(json);
    } catch (e) {
       var mb = new MessageBox("Failed to read file:\n" + e.message,
-         TITLE, StdIcon_Error, StdButton_Ok);
+         TITLE, StdIcon.Error, StdButton.Ok);
       mb.execute();
       return;
    }
 
    if (!data || !data.starPairs || data.starPairs.length === 0) {
       var mb = new MessageBox("No valid star pair data found.",
-         TITLE, StdIcon_Warning, StdButton_Ok);
+         TITLE, StdIcon.Warning, StdButton.Ok);
       mb.execute();
       return;
    }
@@ -2491,8 +2483,8 @@ ManualSolverDialog.prototype.doImport = function () {
             + "File: " + data.imageWidth + " x " + data.imageHeight + "\n"
             + "Current image: " + this.image.width + " x " + this.image.height + "\n\n"
             + "Import anyway?",
-            TITLE, StdIcon_Warning, StdButton_Yes, StdButton_No);
-         if (mb.execute() !== StdButton_Yes) return;
+            TITLE, StdIcon.Warning, StdButton.Yes, StdButton.No);
+         if (mb.execute() !== StdButton.Yes) return;
       }
    }
 
@@ -2500,8 +2492,8 @@ ManualSolverDialog.prototype.doImport = function () {
    if (this.starPairs.length > 0) {
       var mb = new MessageBox(
          "Replace current star pairs (" + this.starPairs.length + ")?\nSelect 'No' to append instead.",
-         TITLE, StdIcon_Question, StdButton_Yes, StdButton_No);
-      if (mb.execute() === StdButton_Yes) {
+         TITLE, StdIcon.Question, StdButton.Yes, StdButton.No);
+      if (mb.execute() === StdButton.Yes) {
          this.starPairs = [];
       }
    }
@@ -2545,6 +2537,8 @@ ManualSolverDialog.prototype.doImport = function () {
       + " (" + data.starPairs.length + " stars)");
 };
 
+};
+
 //============================================================================
 // Main execution
 //============================================================================
@@ -2553,7 +2547,7 @@ function main() {
    if (ImageWindow.activeWindow.isNull) {
       var mb = new MessageBox(
          "No image is open.\nPlease open an image before running this script.",
-         TITLE, StdIcon_Error, StdButton_Ok);
+         TITLE, StdIcon.Error, StdButton.Ok);
       mb.execute();
       return;
    }
@@ -2582,8 +2576,8 @@ function main() {
          + "Image: " + (sessionData.imageId || "(unknown)") + "\n"
          + "Star pairs: " + sessionData.starPairs.length + "\n\n"
          + "Restore?";
-      var mb = new MessageBox(msg, TITLE, StdIcon_Question, StdButton_Yes, StdButton_No);
-      if (mb.execute() === StdButton_Yes) {
+      var mb = new MessageBox(msg, TITLE, StdIcon.Question, StdButton.Yes, StdButton.No);
+      if (mb.execute() === StdButton.Yes) {
          restoredStarPairs = sessionData.starPairs;
          restoredStretchMode = sessionData.stretchMode || "linked";
          restoredRotationAngle = sessionData.rotationAngle || 0;
