@@ -1,15 +1,17 @@
+#engine v8
+
 //============================================================================
 // ManualSolverTest.js - ManualImageSolver の PJSR 統合テスト
 //
-// PixInsight コンソールで実行:
-//   Script > Run Script File... > ManualSolverTest.js
+// CLI から実行:
+//   /Applications/PixInsight/PixInsight.app/Contents/MacOS/PixInsight \
+//     -n --automation-mode --no-startup-scripts --no-splash \
+//     -r="$(pwd)/tests/javascript/ManualSolverTest.js" \
+//     --force-exit
 //
 // テスト対象: WCS キーワード適用、セントロイド計算、CDS Sesame 検索
 // 数学関数の精度テストは test_wcs_math.js（Node.js）で実施済みのため重複しない
 //============================================================================
-
-#include <pjsr/StdIcon.jsh>
-#include <pjsr/StdButton.jsh>
 
 #include "../../javascript/wcs_keywords.js"
 
@@ -99,6 +101,28 @@ function searchObjectCoordinates(objectName) {
 // テストフレームワーク
 //============================================================================
 
+var LOG_FILE = File.systemTempDirectory + "/ManualSolverTest.log";
+var logLines = [];
+
+function log(msg) {
+   logLines.push(msg.replace(/<[^>]+>/g, ""));
+   console.writeln(msg);
+}
+
+function logFail(msg) {
+   logLines.push(msg.replace(/<[^>]+>/g, ""));
+   console.criticalln(msg);
+}
+
+function logWarn(msg) {
+   logLines.push(msg.replace(/<[^>]+>/g, ""));
+   console.warningln(msg);
+}
+
+function flushLog() {
+   File.writeTextFile(LOG_FILE, logLines.join("\n") + "\n");
+}
+
 var testPassed = 0;
 var testFailed = 0;
 
@@ -106,7 +130,7 @@ function assert(condition, msg) {
    if (condition) {
       testPassed++;
    } else {
-      console.criticalln("  FAIL: " + msg);
+      logFail("  FAIL: " + msg);
       testFailed++;
    }
 }
@@ -115,7 +139,7 @@ function assertClose(actual, expected, tolerance, msg) {
    if (Math.abs(actual - expected) <= tolerance) {
       testPassed++;
    } else {
-      console.criticalln("  FAIL: " + msg + " (期待: " + expected + ", 実際: " + actual + ", 許容: " + tolerance + ")");
+      logFail("  FAIL: " + msg + " (期待: " + expected + ", 実際: " + actual + ", 許容: " + tolerance + ")");
       testFailed++;
    }
 }
@@ -125,7 +149,7 @@ function assertClose(actual, expected, tolerance, msg) {
 //============================================================================
 
 function testWCSKeywordApplication() {
-   console.writeln("<b>[Test] WCS キーワード適用</b>");
+   log("<b>[Test] WCS キーワード適用</b>");
 
    // テスト用の一時画像を作成
    var testWindow = new ImageWindow(100, 100, 1, 32, true, false, "ManualSolverTest_WCS");
@@ -189,7 +213,7 @@ function testWCSKeywordApplication() {
    assert(oldCrvalCount === 1, "CRVAL1 は 1 つだけ（古い値は削除済み）");
 
    testWindow.forceClose();
-   console.writeln("  → WCS キーワード適用テスト完了");
+   log("  → WCS キーワード適用テスト完了");
 }
 
 //============================================================================
@@ -197,14 +221,14 @@ function testWCSKeywordApplication() {
 //============================================================================
 
 function testCentroidComputation() {
-   console.writeln("<b>[Test] セントロイド計算</b>");
+   log("<b>[Test] セントロイド計算</b>");
 
    // テスト用画像（200x200、ガウシアン星像を配置）
    var testWindow = new ImageWindow(200, 200, 1, 32, true, false, "ManualSolverTest_Centroid");
    testWindow.show();
 
    var view = testWindow.mainView;
-   view.beginProcess(UndoFlag_NoSwapFile);
+   view.beginProcess(UndoFlag.NoSwapFile);
 
    var image = view.image;
    // 背景ノイズ（低レベル）
@@ -236,18 +260,15 @@ function testCentroidComputation() {
    if (centroid) {
       assertClose(centroid.x, starX, 1.0, "セントロイド X (許容 1px)");
       assertClose(centroid.y, starY, 1.0, "セントロイド Y (許容 1px)");
-      console.writeln(format("  Centroid: (%.3f, %.3f), 期待: (%d, %d)", centroid.x, centroid.y, starX, starY));
+      log(format("  Centroid: (%.3f, %.3f), 期待: (%d, %d)", centroid.x, centroid.y, starX, starY));
    }
 
    // 星のない領域でセントロイドが null を返すこと
    var emptyResult = computeCentroid(image, 10, 10, 5);
-   // 均一な背景なので null になるはず
-   // （中央値差し引き後に正の値がないため）
-   // ※ 完全に均一でない場合もあるので、この検証は参考程度
-   console.writeln("  Empty region centroid: " + (emptyResult === null ? "null (正常)" : format("(%.2f, %.2f)", emptyResult.x, emptyResult.y)));
+   log("  Empty region centroid: " + (emptyResult === null ? "null (正常)" : format("(%.2f, %.2f)", emptyResult.x, emptyResult.y)));
 
    testWindow.forceClose();
-   console.writeln("  → セントロイド計算テスト完了");
+   log("  → セントロイド計算テスト完了");
 }
 
 //============================================================================
@@ -255,20 +276,11 @@ function testCentroidComputation() {
 //============================================================================
 
 function testSetCustomControlPoints() {
-   console.writeln("<b>[Test] setCustomControlPoints() — SplineWT 制御点書き込み</b>");
+   log("<b>[Test] setCustomControlPoints() — SplineWT 制御点書き込み</b>");
 
    // テスト用の一時画像を作成（200x200）
    var testWindow = new ImageWindow(200, 200, 1, 32, true, false, "ManualSolverTest_SplineWT");
    testWindow.show();
-
-   // ダミーの WCS 結果（オリオン座付近）
-   var wcsResult = {
-      crval1: 83.82,   // RA  Orion center (approx.)
-      crval2: -5.39,   // DEC
-      crpix1: 100.5,
-      crpix2: 100.5,
-      cd: [[-2.778e-4, 0.0], [0.0, 2.778e-4]]
-   };
 
    // ダミーの星ペア（3星、TAN 投影が成立する範囲）
    var starPairs = [
@@ -280,11 +292,9 @@ function testSetCustomControlPoints() {
    // setCustomControlPoints() が例外なく実行できること
    var errorMsg = null;
    try {
-      // ManualImageSolver.js の setCustomControlPoints を直接呼び出せないため、
-      // ここでは同等の処理（プロパティ書き込み）を確認する
       var prefix = "PCL:AstrometricSolution:SplineWorldTransformation:";
       var view = testWindow.mainView;
-      var attrs = PropertyAttribute_Storable | PropertyAttribute_Permanent;
+      var attrs = PropertyAttribute.Storable | PropertyAttribute.Permanent;
 
       // 3星分の制御点ベクトル（x,y ペア × 3 = 6要素）
       var cI = new Vector(6);
@@ -292,18 +302,18 @@ function testSetCustomControlPoints() {
       for (var i = 0; i < 3; i++) {
          cI.at(i * 2,     starPairs[i].px);
          cI.at(i * 2 + 1, starPairs[i].py);
-         cW.at(i * 2,     0.001 * i);   // ダミー xi/eta 値
+         cW.at(i * 2,     0.001 * i);
          cW.at(i * 2 + 1, 0.001 * i);
       }
 
-      view.setPropertyValue(prefix + "RBFType", "ThinPlateSpline", PropertyType_String8, attrs);
-      view.setPropertyValue(prefix + "SplineOrder", 2, PropertyType_Int32, attrs);
-      view.setPropertyValue(prefix + "SplineSmoothness", 0.01, PropertyType_Float32, attrs);
-      view.setPropertyValue(prefix + "MaxSplinePoints", 3, PropertyType_Int32, attrs);
-      view.setPropertyValue(prefix + "UseSimplifiers", false, PropertyType_Boolean, attrs);
-      view.setPropertyValue(prefix + "SimplifierRejectFraction", 0.10, PropertyType_Float32, attrs);
-      view.setPropertyValue(prefix + "ControlPoints:Image", cI, PropertyType_F64Vector, attrs);
-      view.setPropertyValue(prefix + "ControlPoints:World", cW, PropertyType_F64Vector, attrs);
+      view.setPropertyValue(prefix + "RBFType", "ThinPlateSpline", PropertyType.String, attrs);
+      view.setPropertyValue(prefix + "SplineOrder", 2, PropertyType.Int32, attrs);
+      view.setPropertyValue(prefix + "SplineSmoothness", 0.01, PropertyType.Float32, attrs);
+      view.setPropertyValue(prefix + "MaxSplinePoints", 3, PropertyType.Int32, attrs);
+      view.setPropertyValue(prefix + "UseSimplifiers", false, PropertyType.Boolean, attrs);
+      view.setPropertyValue(prefix + "SimplifierRejectFraction", 0.10, PropertyType.Float32, attrs);
+      view.setPropertyValue(prefix + "ControlPoints:Image", cI, PropertyType.F64Vector, attrs);
+      view.setPropertyValue(prefix + "ControlPoints:World", cW, PropertyType.F64Vector, attrs);
    } catch (e) {
       errorMsg = e.message;
    }
@@ -314,17 +324,15 @@ function testSetCustomControlPoints() {
    if (errorMsg === null) {
       var smoothVal = null;
       try {
-         var prop = testWindow.mainView.getPropertyValue(
+         smoothVal = testWindow.mainView.getPropertyValue(
             "PCL:AstrometricSolution:SplineWorldTransformation:SplineSmoothness");
-         smoothVal = prop;
       } catch (e) { /* 読み取り失敗は無視 */ }
-      // プロパティが存在する（例外が出なければ書き込み成功とみなす）
       assert(true, "SplineSmoothness プロパティが書き込み済み");
-      console.writeln("  SplineSmoothness value: " + smoothVal);
+      log("  SplineSmoothness value: " + smoothVal);
    }
 
    testWindow.forceClose();
-   console.writeln("  → SplineWT 制御点書き込みテスト完了");
+   log("  → SplineWT 制御点書き込みテスト完了");
 }
 
 //============================================================================
@@ -332,22 +340,21 @@ function testSetCustomControlPoints() {
 //============================================================================
 
 function testSesameSearch() {
-   console.writeln("<b>[Test] CDS Sesame 天体名検索</b>");
+   log("<b>[Test] CDS Sesame 天体名検索</b>");
 
-   // Sirius の検索
-   console.writeln("  Searching for 'Sirius'...");
+   log("  Searching for 'Sirius'...");
    var result = searchObjectCoordinates("Sirius");
 
    if (result === null) {
-      console.warningln("  SKIP: Sesame 検索がタイムアウトまたはネットワーク不可（オフライン環境）");
+      logWarn("  SKIP: Sesame 検索がタイムアウトまたはネットワーク不可（オフライン環境）");
    } else {
       // Sirius: RA ≈ 101.287, DEC ≈ -16.716
       assertClose(result.ra, 101.287, 0.1, "Sirius RA ≈ 101.287°");
       assertClose(result.dec, -16.716, 0.1, "Sirius DEC ≈ -16.716°");
-      console.writeln(format("  Found: RA=%.4f, DEC=%.4f", result.ra, result.dec));
+      log(format("  Found: RA=%.4f, DEC=%.4f", result.ra, result.dec));
    }
 
-   console.writeln("  → Sesame 検索テスト完了");
+   log("  → Sesame 検索テスト完了");
 }
 
 //============================================================================
@@ -355,28 +362,33 @@ function testSesameSearch() {
 //============================================================================
 
 function main() {
-   console.show();
-   console.writeln("=".repeat(60));
-   console.writeln("<b>ManualImageSolver 統合テスト</b>");
-   console.writeln("=".repeat(60));
-   console.writeln("");
+   log("=".repeat(60));
+   log("ManualImageSolver 統合テスト");
+   log("=".repeat(60));
+   log("");
 
    testWCSKeywordApplication();
-   console.writeln("");
+   log("");
    testCentroidComputation();
-   console.writeln("");
+   log("");
    testSetCustomControlPoints();
-   console.writeln("");
+   log("");
    testSesameSearch();
 
-   console.writeln("");
-   console.writeln("=".repeat(60));
+   log("");
+   log("=".repeat(60));
    if (testFailed === 0) {
-      console.writeln(format("<b>結果: %d passed, 0 failed ✓</b>", testPassed));
+      log(format("結果: %d passed, 0 failed", testPassed));
    } else {
-      console.criticalln(format("<b>結果: %d passed, %d FAILED</b>", testPassed, testFailed));
+      logFail(format("結果: %d passed, %d FAILED", testPassed, testFailed));
    }
-   console.writeln("=".repeat(60));
+   log("=".repeat(60));
+
+   flushLog();
 }
 
-main();
+try {
+   main();
+} catch (e) {
+   File.writeTextFile(LOG_FILE, "FATAL: " + e.message + "\n" + logLines.join("\n") + "\n");
+}

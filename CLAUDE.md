@@ -30,8 +30,11 @@ node tests/javascript/test_wcs_math.js
 # Node.js 単体テスト実行（座標パース + MTF）
 node tests/javascript/test_parse_coords.js
 
-# PJSR 統合テストは PixInsight コンソールで実行
-# Script > Run Script File... > tests/javascript/ManualSolverTest.js
+# PJSR 統合テスト実行（PixInsight 1.9.4+、V8 エンジン）
+/Applications/PixInsight/PixInsight.app/Contents/MacOS/PixInsight \
+  -n --automation-mode --no-splash \
+  -r="$(pwd)/tests/javascript/ManualSolverTest.js" \
+  --force-exit && cat "${TMPDIR}ManualSolverTest.log"
 ```
 
 ## アーキテクチャ

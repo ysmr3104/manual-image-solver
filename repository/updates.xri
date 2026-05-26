@@ -4,11 +4,22 @@
       <title>Manual Image Solver</title>
       <brief_description>Manual plate solver for PixInsight</brief_description>
    </description>
-   <platform os="all" arch="noarch" version="1.8.9:9.9.9">
-      <package fileName="ManualImageSolver-1.4.0.zip"
-               sha1="9c31dc5f9cd7708adb1b265df6846f5e9a2b0e6f"
+   <platform os="all" arch="noarch" version="1.8.9:1.9.3">
+      <package fileName="ManualImageSolver-1.4.1.zip"
+               sha1="47b4b3dc819237e0eefcc1c5d02dc019b120b7f1"
                type="script"
-               releaseDate="20260320">
+               releaseDate="20260324">
+         <title>Manual Image Solver</title>
+         <description>
+            <p>Manual plate solver: interactively identify stars and compute a TAN-projection WCS solution.</p>
+         </description>
+      </package>
+   </platform>
+   <platform os="all" arch="noarch" version="1.9.4:9.9.9">
+      <package fileName="ManualImageSolver-2.0.0.zip"
+               sha1="d9caf839fd0831416b3bf9f6c949d8c12033cac3"
+               type="script"
+               releaseDate="20260526">
          <title>Manual Image Solver</title>
          <description>
             <p>Manual plate solver: interactively identify stars and compute a TAN-projection WCS solution.</p>
