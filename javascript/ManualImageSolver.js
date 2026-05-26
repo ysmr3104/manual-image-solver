@@ -225,7 +225,7 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight, proje
    view.deleteProperty("PCL:AstrometricSolution:Information");
 
    // Projection system
-   view.setPropertyValue("PCL:AstrometricSolution:ProjectionSystem", PROJECTION_INFO[projType].piName, PropertyType.String8, attrs);
+   view.setPropertyValue("PCL:AstrometricSolution:ProjectionSystem", PROJECTION_INFO[projType].piName, PropertyType.String, attrs);
 
    // Reference celestial coordinates (degrees)
    var refCelestial = new Vector([wcsResult.crval1, wcsResult.crval2]);
@@ -257,7 +257,7 @@ function applyWCSToImage(targetWindow, wcsResult, imageWidth, imageHeight, proje
    // Observation center coordinates
    view.setPropertyValue("Observation:Center:RA", imgCenter[0], PropertyType.Float64, attrs);
    view.setPropertyValue("Observation:Center:Dec", imgCenter[1], PropertyType.Float64, attrs);
-   view.setPropertyValue("Observation:CelestialReferenceSystem", "ICRS", PropertyType.String8, attrs);
+   view.setPropertyValue("Observation:CelestialReferenceSystem", "ICRS", PropertyType.String, attrs);
    view.setPropertyValue("Observation:Equinox", 2000.0, PropertyType.Float64, attrs);
 
    // Creation metadata
@@ -315,7 +315,7 @@ function setCustomControlPoints(window, wcsResult, starPairs, imageWidth, imageH
 
    var attrs = PropertyAttribute.Storable | PropertyAttribute.Permanent;
    var prefix = "PCL:AstrometricSolution:SplineWorldTransformation:";
-   view.setPropertyValue(prefix + "RBFType", "ThinPlateSpline", PropertyType.String8, attrs);
+   view.setPropertyValue(prefix + "RBFType", "ThinPlateSpline", PropertyType.String, attrs);
    view.setPropertyValue(prefix + "SplineOrder", 2, PropertyType.Int32, attrs);
    view.setPropertyValue(prefix + "SplineSmoothness", smoothness, PropertyType.Float32, attrs);
    view.setPropertyValue(prefix + "MaxSplinePoints", nTotal, PropertyType.Int32, attrs);
@@ -1173,13 +1173,13 @@ function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, r
    var jsonStr = JSON.stringify(data).replace(/[-￿]/g, function (ch) {
       return "\\u" + ("0000" + ch.charCodeAt(0).toString(16)).slice(-4);
    });
-   Settings.write(SETTINGS_KEY, DataType_String, jsonStr);
+   Settings.write(SETTINGS_KEY, DataType.String, jsonStr);
 }
 
 // Load session data from Settings
 // On success: parsed object, on failure: null
 function loadSession() {
-   var raw = Settings.read(SETTINGS_KEY, DataType_String);
+   var raw = Settings.read(SETTINGS_KEY, DataType.String);
    if (!raw || raw.length === 0) return null;
    try {
       var data = JSON.parse(raw);
@@ -2457,7 +2457,7 @@ doImport() {
    try {
       var f = new File;
       f.openForReading(ofd.fileName);
-      var buf = f.read(DataType_ByteArray, f.size);
+      var buf = f.read(DataType.ByteArray, f.size);
       f.close();
       var json = buf.utf8ToString();
       var data = JSON.parse(json);
