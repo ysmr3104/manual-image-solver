@@ -1142,6 +1142,55 @@ constructor(parent, starIndex, starData) {
 };
 
 //============================================================================
+// Session save/restore
+//============================================================================
+
+#define SETTINGS_KEY "ManualImageSolver/sessionData"
+
+// Save session data to Settings
+function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, rotationAngle, smoothness, suggestEnabled, magLimit, projectionType) {
+   var data = {
+      imageId: imageId,
+      imageWidth: imageWidth,
+      imageHeight: imageHeight,
+      stretchMode: stretchMode,
+      rotationAngle: rotationAngle || 0,
+      smoothness: typeof smoothness === "number" ? smoothness : 0.01,
+      suggestEnabled: suggestEnabled !== false,
+      magLimit: typeof magLimit === "number" ? magLimit : 30,
+      projectionType: projectionType || "TAN",
+      starPairs: []
+   };
+   for (var i = 0; i < starPairs.length; i++) {
+      var s = starPairs[i];
+      data.starPairs.push({
+         px: s.px, py: s.py,
+         ra: s.ra, dec: s.dec,
+         name: s.name || ""
+      });
+   }
+   // Escape non-ASCII characters to \uXXXX for safe storage in Settings API
+   var jsonStr = JSON.stringify(data).replace(/[-￿]/g, function (ch) {
+      return "\\u" + ("0000" + ch.charCodeAt(0).toString(16)).slice(-4);
+   });
+   Settings.write(SETTINGS_KEY, DataType_String, jsonStr);
+}
+
+// Load session data from Settings
+// On success: parsed object, on failure: null
+function loadSession() {
+   var raw = Settings.read(SETTINGS_KEY, DataType_String);
+   if (!raw || raw.length === 0) return null;
+   try {
+      var data = JSON.parse(raw);
+      if (!data || !data.starPairs || data.starPairs.length === 0) return null;
+      return data;
+   } catch (e) {
+      return null;
+   }
+}
+
+//============================================================================
 // ManualSolverDialog: Main dialog
 //============================================================================
 
@@ -2318,55 +2367,6 @@ doApply() {
       TITLE, StdIcon.Information, StdButton.Ok);
    mb.execute();
 };
-
-//============================================================================
-// Session save/restore
-//============================================================================
-
-#define SETTINGS_KEY "ManualImageSolver/sessionData"
-
-// Save session data to Settings
-function saveSession(imageId, imageWidth, imageHeight, stretchMode, starPairs, rotationAngle, smoothness, suggestEnabled, magLimit, projectionType) {
-   var data = {
-      imageId: imageId,
-      imageWidth: imageWidth,
-      imageHeight: imageHeight,
-      stretchMode: stretchMode,
-      rotationAngle: rotationAngle || 0,
-      smoothness: typeof smoothness === "number" ? smoothness : 0.01,
-      suggestEnabled: suggestEnabled !== false,
-      magLimit: typeof magLimit === "number" ? magLimit : 30,
-      projectionType: projectionType || "TAN",
-      starPairs: []
-   };
-   for (var i = 0; i < starPairs.length; i++) {
-      var s = starPairs[i];
-      data.starPairs.push({
-         px: s.px, py: s.py,
-         ra: s.ra, dec: s.dec,
-         name: s.name || ""
-      });
-   }
-   // Escape non-ASCII characters to \uXXXX for safe storage in Settings API
-   var jsonStr = JSON.stringify(data).replace(/[\u0080-\uffff]/g, function (ch) {
-      return "\\u" + ("0000" + ch.charCodeAt(0).toString(16)).slice(-4);
-   });
-   Settings.write(SETTINGS_KEY, DataType_String, jsonStr);
-}
-
-// Load session data from Settings
-// On success: parsed object, on failure: null
-function loadSession() {
-   var raw = Settings.read(SETTINGS_KEY, DataType_String);
-   if (!raw || raw.length === 0) return null;
-   try {
-      var data = JSON.parse(raw);
-      if (!data || !data.starPairs || data.starPairs.length === 0) return null;
-      return data;
-   } catch (e) {
-      return null;
-   }
-}
 
 //----------------------------------------------------------------------------
 // Save session on dialog close
