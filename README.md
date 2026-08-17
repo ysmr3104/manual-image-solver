@@ -164,6 +164,14 @@ See [docs/specs.md](docs/specs.md) for the full technical specification.
 
 The star-only control point method used in this project follows the approach of the original ManualImageSolver script by Andrés del Pozo (Copyright 2013–2020).
 
+## Support
+
+This script is free, and will stay free. If it saved you time, you can support its continued development:
+
+[![Sponsor](https://img.shields.io/badge/Sponsor-ysmr3104-ea4aaa?logo=githubsponsors)](https://github.com/sponsors/ysmr3104)
+
+Sponsorship is entirely optional. Bug reports and feature requests are just as valuable.
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
