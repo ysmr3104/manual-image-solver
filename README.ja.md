@@ -166,6 +166,14 @@ WCS 適用後、PixInsight の **AnnotateImage** で星座や天体のアノテ�
 
 本プロジェクトにおける星点のみを制御点とする手法は、Andrés del Pozo 氏（Copyright 2013–2020）によるオリジナルの ManualImageSolver スクリプトの方式に倣っています。
 
+## 支援について
+
+このスクリプトは無料で公開しており、今後も無料のままです。役に立った、開発を続けてほしいと思っていただけたら、GitHub Sponsors から支援いただけます。
+
+[![Sponsor](https://img.shields.io/badge/Sponsor-ysmr3104-ea4aaa?logo=githubsponsors)](https://github.com/sponsors/ysmr3104)
+
+支援は任意です。バグ報告や機能要望も同じくらいありがたいです。
+
 ## ライセンス
 
 本プロジェクトは [MIT License](LICENSE) のもとで公開されています。
