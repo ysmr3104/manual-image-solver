@@ -1,6 +1,6 @@
 #engine v8
 
-#feature-id    ManualImageSolver : Astrometry > ManualImageSolver
+#feature-id    ManualImageSolver : Astrometry > ManualImageSolver | ysmrastro > ManualImageSolver
 #feature-info  Manual plate solver: interactively identify stars in a PJSR dialog \
    and compute a TAN-projection WCS solution, then apply it to the active image.
 
@@ -13,7 +13,7 @@
 // Copyright (c) 2026 Manual Image Solver Project
 //----------------------------------------------------------------------------
 
-#define VERSION "2.0.0"
+#define VERSION "2.0.1"
 
 
 #include "wcs_math.js"
