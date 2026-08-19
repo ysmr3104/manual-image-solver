@@ -16,10 +16,10 @@
       </package>
    </platform>
    <platform os="all" arch="noarch" version="1.9.4:9.9.9">
-      <package fileName="ManualImageSolver-2.0.0.zip"
-               sha1="d9caf839fd0831416b3bf9f6c949d8c12033cac3"
+      <package fileName="ManualImageSolver-2.0.1.zip"
+               sha1="12e9287148d61b0ad88beb8099c328822a2bd916"
                type="script"
-               releaseDate="20260526">
+               releaseDate="20260819">
          <title>Manual Image Solver</title>
          <description>
             <p>Manual plate solver: interactively identify stars and compute a TAN-projection WCS solution.</p>
