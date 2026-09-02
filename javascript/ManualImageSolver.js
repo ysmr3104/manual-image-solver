@@ -375,7 +375,20 @@ function searchObjectCoordinates(objectName) {
 // Auto stretch (MTF-based) + Bitmap generation
 //============================================================================
 
-// PixInsight STF method: median + MAD based MTF parameter computation
+// PixInsight STF: the shadow clipping point sits a fixed number of NORMALIZED
+// MAD units below the median, and the midtones balance is the one that maps
+// the clipped median onto the target background.
+//
+// This mirrors PixInsight's own AutoStretch (DeLinear.js among the bundled
+// scripts, and Image.computeAutoStretch()). Checked against
+// Image.computeAutoStretch() on PixInsight 1.9.4 over the range of medians an
+// astronomical frame produces: the two agree to within floating-point noise.
+// See tests for the reference values.
+//
+// The arithmetic is spelled out rather than calling Math.mtf() and
+// Math.range() so that the unit tests can exercise it under plain node, where
+// those PJSR extensions do not exist.
+//
 // channel: channel number for statistics (default 0)
 function computeAutoSTF(image, channel) {
    if (typeof channel === "undefined") channel = 0;
@@ -383,40 +396,34 @@ function computeAutoSTF(image, channel) {
    var savedChannel = image.selectedChannel;
    image.selectedChannel = channel;
    var median = image.median();
-
-   // Get MAD (may not be implemented in some PJSR versions)
-   var mad;
-   try {
-      mad = image.MAD();
-   } catch (e) {
-      // Approximate MAD with avgDev * 1.4826 if MAD is not implemented
-      mad = image.avgDev() * 1.4826;
-   }
+   // 1.4826 * MAD estimates the standard deviation of normally distributed
+   // data, and the STF is defined in those units, so the factor is part of the
+   // formula rather than an adjustment. Dropping it moves the clipping point
+   // closer to the median and crushes the background.
+   var madn = image.MAD() * 1.4826;
    image.selectedChannel = savedChannel;
 
-   // Fallback for uniform images where MAD is 0
-   if (mad === 0 || mad < 1e-15) {
-      return { shadowClip: 0.0, midtone: 0.5 };
+   // PixInsight's own defaults: target mean background in the [0,1] range, and
+   // the shadow clipping point in normalized MAD units from the median.
+   var targetBackground = 0.25;
+   var shadowClipK = -2.8;
+
+   // A dispersion that vanishes against 1 leaves the shadow point at zero. The
+   // midtones balance is still computed from the median, which is what
+   // PixInsight does for a uniform image.
+   var shadow = 0.0;
+   if (1 + madn !== 1) {
+      shadow = median + shadowClipK * madn;
+      if (shadow < 0) shadow = 0;
+      if (shadow > 1) shadow = 1;
    }
 
-   // STF parameters (PixInsight defaults)
-   var targetMedian = 0.25;    // Target median
-   var shadowClipK = -2.8;     // Shadow clipping coefficient
-
-   var shadow = median + shadowClipK * mad;
-   if (shadow < 0) shadow = 0;
-
-   // Midtone function parameter: map median to targetMedian after stretch
-   var normalizedMedian = (median - shadow) / (1.0 - shadow);
-   if (normalizedMedian <= 0) normalizedMedian = 1e-6;
-   if (normalizedMedian >= 1) normalizedMedian = 1 - 1e-6;
-
-   // Compute MTF parameter m: MTF(m, normalizedMedian) = targetMedian
-   // m = (targetMedian - 1) * normalizedMedian / ((2*targetMedian - 1) * normalizedMedian - targetMedian)
-   var m = (targetMedian - 1.0) * normalizedMedian /
-           ((2.0 * targetMedian - 1.0) * normalizedMedian - targetMedian);
-   if (m < 0) m = 0;
-   if (m > 1) m = 1;
+   // The midtones balance m satisfying MTF(m, median - shadow) =
+   // targetBackground reduces to m = MTF(targetBackground, median - shadow).
+   // The denominator cannot vanish while median - shadow lies in [0,1].
+   var x = median - shadow;
+   var m = (targetBackground - 1.0) * x /
+           ((2.0 * targetBackground - 1.0) * x - targetBackground);
 
    return { shadowClip: shadow, midtone: m };
 }
