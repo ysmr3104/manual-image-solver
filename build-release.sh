@@ -30,6 +30,50 @@ CURRENT_VERSION_RANGE="1.9.4:9.9.9"
 
 echo "=== ${PACKAGE_NAME} v${VERSION} リリースビルド ==="
 
+# 0. 署名の検査
+# 署名は #include を展開したあとのコードにかかり、無効な #ifdef の中の #include も
+# 解決される。PixInsight 同梱のファイル（../AdP/、<pjsr/...> など）を取り込むと、
+# PixInsight の更新で署名が無効になる（SplitImageSolver 2.0.1 が 1.9.5 で
+# "Invalid code signature" になった。pixinsight-handbook の lessons.md）
+SIGNATURE="${SCRIPT_DIR}/javascript/ManualImageSolver.xsgn"
+# 署名の対象になるファイル（本体と、本体が #include するもの）
+SIGNED_SOURCES=(
+    "${MAIN_SCRIPT}"
+    "${SCRIPT_DIR}/javascript/wcs_math.js"
+    "${SCRIPT_DIR}/javascript/wcs_keywords.js"
+    "${SCRIPT_DIR}/javascript/catalog_data.js"
+)
+# 許可するのは同じディレクトリのファイル名だけの #include。それ以外（"../"、絶対パス、
+# <...>、サブディレクトリ経由）は PixInsight 同梱ファイルを取り込みうるので止める
+if grep -nE '^[[:space:]]*#include' "${SIGNED_SOURCES[@]}" \
+        | grep -vE ':[[:space:]]*#include[[:space:]]+"[A-Za-z0-9_]+\.(js|jsh)"'; then
+    echo "ERROR: 同じディレクトリ以外のファイルを #include しています（上の行）。署名が PixInsight の版に縛られます" >&2
+    exit 1
+fi
+# 本体が #include するのは上の 3 本だけであること（増えたら SIGNED_SOURCES に足す）
+INCLUDED=$( (grep -hE '^[[:space:]]*#include' "${MAIN_SCRIPT}" || true) | sed -E 's/.*"([^"]+)".*/\1/' | sort | tr '\n' ' ')
+if [ "${INCLUDED}" != "catalog_data.js wcs_keywords.js wcs_math.js " ]; then
+    echo "ERROR: 本体の #include が想定と違う: ${INCLUDED}（SIGNED_SOURCES を見直すこと）" >&2
+    exit 1
+fi
+# include 先がさらに #include すると、そのファイルが新旧の判定から漏れるので止める
+if grep -nE '^[[:space:]]*#include' "${SIGNED_SOURCES[@]:1}"; then
+    echo "ERROR: include 先がさらに #include しています（上の行）。SIGNED_SOURCES に足してから検査を見直すこと" >&2
+    exit 1
+fi
+if [ ! -f "${SIGNATURE}" ]; then
+    echo "ERROR: ${SIGNATURE} がありません。先に署名してください" >&2
+    exit 1
+fi
+for SRC in "${SIGNED_SOURCES[@]}"; do
+    if [ "${SIGNATURE}" -ot "${SRC}" ]; then
+        echo "ERROR: 署名が $(basename "${SRC}") より古い。署名し直してください" >&2
+        exit 1
+    fi
+done
+# mtime の比較は完全ではない（clone 直後など）。最後の砦は配信前の
+# Security.getScriptSignature() による検証（pixinsight-handbook/docs/release.md）
+
 # 1. repository/ ディレクトリ作成
 mkdir -p "${REPO_DIR}"
 
